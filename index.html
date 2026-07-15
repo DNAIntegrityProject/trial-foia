@@ -24,6 +24,8 @@
   th,td{ text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
   th{ background:#eef2f8; font-size:12px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); position:sticky; top:0; cursor:pointer; }
   td.fn{ font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; word-break:break-all; max-width:520px; }
+  a.fnlink{ color:var(--blue2); text-decoration:none; }
+  a.fnlink:hover{ text-decoration:underline; }
   .badge{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; }
   .b-new{ background:#fde7e6; color:var(--red); }
   .b-phmpt{ background:#e6f0e9; color:var(--green); }
@@ -134,14 +136,19 @@ function render(){
     const badge = r.status==="NEW"
       ? `<span class="badge b-new">NEW</span>`
       : `<span class="badge b-phmpt">PHMPT</span>`;
-    const docLabel = r.status==="NEW" ? "New (in ZIP)" : "Document";
+    // The primary link is "individual" unless it's actually a .zip bundle.
+    const isZip = /\.zip(\?|$)/i.test(r.doc_link);
+    const fnCell = isZip
+      ? r.filename
+      : `<a class="fnlink" href="${r.doc_link}" target="_blank" rel="noopener">${r.filename}</a>`;
+    const docLabel = isZip ? "In ZIP" : (r.status==="NEW" ? "Download" : "Open");
     let links = `<a class="doc" href="${r.doc_link}" target="_blank" rel="noopener">${docLabel}</a>`;
     if (r.zip_link && r.zip_link !== r.doc_link)
       links += `<a href="${r.zip_link}" target="_blank" rel="noopener">ZIP</a>`;
     if (r.gdrive)
       links += `<a class="drive" href="${r.gdrive}" target="_blank" rel="noopener" title="${r.gdrive_nav}">Drive</a>`;
     return `<tr>
-      <td class="fn">${r.filename}</td>
+      <td class="fn">${fnCell}</td>
       <td class="cat">${r.category}</td>
       <td class="cat">${r.module||""}</td>
       <td class="cat">${r.size_mb}</td>
