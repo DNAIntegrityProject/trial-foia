@@ -65,6 +65,7 @@
   <div class="controls">
     <input type="search" id="q" placeholder="Search filename…">
     <select id="cat"></select>
+    <select id="ext"></select>
     <select id="source">
       <option value="">All sources</option>
       <option value="new">New (hosted here)</option>
@@ -79,6 +80,7 @@
     <thead><tr>
       <th data-k="filename">Filename</th>
       <th data-k="category">Category</th>
+      <th data-k="ext">Ext</th>
       <th data-k="module">Mod</th>
       <th data-k="size_mb">MB</th>
       <th data-k="source">Source</th>
@@ -102,6 +104,7 @@ fetch("documents.json").then(r => r.json()).then(d => {
   DATA = d;
   buildStats();
   buildCatFilter();
+  buildExtFilter();
   apply();
 });
 
@@ -118,14 +121,24 @@ function buildCatFilter(){
   document.getElementById("cat").innerHTML =
     `<option value="">All categories</option>` + cats.map(c => `<option>${c}</option>`).join("");
 }
+function buildExtFilter(){
+  const counts = {};
+  DATA.forEach(r => counts[r.ext] = (counts[r.ext]||0)+1);
+  const exts = Object.keys(counts).sort((a,b)=>counts[b]-counts[a]);
+  document.getElementById("ext").innerHTML =
+    `<option value="">All types</option>` +
+    exts.map(e => `<option value="${e}">.${e} (${counts[e].toLocaleString()})</option>`).join("");
+}
 function apply(){
   const q = document.getElementById("q").value.toLowerCase().trim();
   const cat = document.getElementById("cat").value;
+  const ext = document.getElementById("ext").value;
   const src = document.getElementById("source").value;
   const gdonly = document.getElementById("gdonly").checked;
   view = DATA.filter(r =>
     (!q || r.filename.toLowerCase().includes(q)) &&
     (!cat || r.category===cat) &&
+    (!ext || r.ext===ext) &&
     (!src || r.source===src) &&
     (!gdonly || r.gdrive));
   view.sort((a,b)=>{
@@ -151,6 +164,7 @@ function render(){
     return `<tr>
       <td class="fn">${fnCell}</td>
       <td class="cat">${r.category}</td>
+      <td class="cat">${r.ext}</td>
       <td class="cat">${r.module||""}</td>
       <td class="cat">${r.size_mb}</td>
       <td><span class="tag tag-${r.source}">${TAG[r.source]}</span></td>
@@ -164,6 +178,7 @@ function render(){
 }
 document.getElementById("q").addEventListener("input", apply);
 document.getElementById("cat").addEventListener("change", apply);
+document.getElementById("ext").addEventListener("change", apply);
 document.getElementById("source").addEventListener("change", apply);
 document.getElementById("gdonly").addEventListener("change", apply);
 document.getElementById("prev").addEventListener("click", ()=>{ if(page>0){page--; render();} });
