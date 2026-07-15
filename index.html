@@ -33,6 +33,7 @@
   .tag-new{ background:#e4eefb; color:#1a63c9; }
   .tag-phmpt{ background:#e6f0e9; color:#137333; }
   .tag-gdrive{ background:#f7efe0; color:#8a5a00; }
+  .bimo-chip{ display:inline-block; margin-right:6px; padding:1px 6px; border-radius:4px; font-size:10px; font-weight:700; background:#ede7fb; color:#5b3bb5; vertical-align:middle; }
   .cat{ font-size:12px; color:var(--muted); white-space:nowrap; }
   .links a{ display:inline-block; margin-right:6px; padding:3px 8px; border-radius:6px; font-size:11px; text-decoration:none; border:1px solid var(--line); color:var(--blue2); white-space:nowrap; }
   .links a.drive{ background:#fff8e1; border-color:#f0d67a; color:#7a5b00; }
@@ -72,6 +73,7 @@
       <option value="phmpt">PHMPT</option>
       <option value="gdrive">Google Drive</option>
     </select>
+    <label><input type="checkbox" id="bimoonly"> BIMO records only</label>
     <label><input type="checkbox" id="gdonly"> Has Google Drive</label>
     <span class="muted" id="count"></span>
   </div>
@@ -112,8 +114,9 @@ function buildStats(){
   const n = DATA.length;
   const nw = DATA.filter(r => r.status==="NEW").length;
   const gd = DATA.filter(r => r.gdrive).length;
+  const bm = DATA.filter(r => r.bimo).length;
   document.getElementById("stats").innerHTML = [
-    ["Documents", n], ["PHMPT (existing)", n-nw], ["New in release", nw], ["With Google Drive", gd]
+    ["Documents", n], ["BIMO records", bm], ["New in release", nw], ["With Google Drive", gd]
   ].map(([l,v]) => `<div class="stat"><b>${v.toLocaleString()}</b><span>${l}</span></div>`).join("");
 }
 function buildCatFilter(){
@@ -135,11 +138,13 @@ function apply(){
   const ext = document.getElementById("ext").value;
   const src = document.getElementById("source").value;
   const gdonly = document.getElementById("gdonly").checked;
+  const bimoonly = document.getElementById("bimoonly").checked;
   view = DATA.filter(r =>
     (!q || r.filename.toLowerCase().includes(q)) &&
     (!cat || r.category===cat) &&
     (!ext || r.ext===ext) &&
     (!src || r.source===src) &&
+    (!bimoonly || r.bimo) &&
     (!gdonly || r.gdrive));
   view.sort((a,b)=>{
     let x=a[sortKey], y=b[sortKey];
@@ -154,7 +159,8 @@ function render(){
   const TAG = { new:"New", phmpt:"PHMPT", gdrive:"Google" };
   document.getElementById("rows").innerHTML = slice.map(r => {
     // Filename is the primary link, colored by where it points.
-    const fnCell = `<a class="fn fn-${r.source}" href="${r.primary}" target="_blank" rel="noopener">${r.filename}</a>`;
+    const chip = r.bimo ? `<span class="bimo-chip" title="Bioresearch Monitoring inspection record">BIMO</span>` : "";
+    const fnCell = `${chip}<a class="fn fn-${r.source}" href="${r.primary}" target="_blank" rel="noopener">${r.filename}</a>`;
     let alt = "";
     if (r.zip_link && r.zip_link !== r.primary)
       alt += `<a href="${r.zip_link}" target="_blank" rel="noopener">ZIP</a>`;
@@ -181,6 +187,7 @@ document.getElementById("cat").addEventListener("change", apply);
 document.getElementById("ext").addEventListener("change", apply);
 document.getElementById("source").addEventListener("change", apply);
 document.getElementById("gdonly").addEventListener("change", apply);
+document.getElementById("bimoonly").addEventListener("change", apply);
 document.getElementById("prev").addEventListener("click", ()=>{ if(page>0){page--; render();} });
 document.getElementById("next").addEventListener("click", ()=>{ page++; render(); });
 document.querySelectorAll("th[data-k]").forEach(th=>th.addEventListener("click", ()=>{
