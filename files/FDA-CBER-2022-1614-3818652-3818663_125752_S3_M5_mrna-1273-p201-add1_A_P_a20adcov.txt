@@ -1,0 +1,527 @@
+*************************************************************************************************;
+* 
+*           CLIENT:  ModernaTX, Inc.
+*         PROTOCOL:  mRNA-1273-P201
+*
+*          PURPOSE: Create analysis dataset ad<xx>
+*      
+*      INPUT FILES: SDTM domains
+*     OUTPUT FILES: adcov.sas7bdat
+*
+*      USAGE NOTES: 
+*      
+*************************************************************************************************;
+*  (c) 2020 PPD
+*  All Rights Reserved. 
+*************************************************************************************************;
+
+**Assign global macro variable DSETNAME to reflect the name of the final ADaM dataset**;
+%include 'madam.sas';
+%global DSETNAME;
+%let dsetname = ADCOV;
+%let adam_spec_loc = &g_projectpath.&g_toplevel.\Documents\Specs;
+/*%let adam_spec = Moderna mRNA1273P201 ADaM spec.xlsm;*/
+
+** formats;
+proc format;
+	invalue avisitn
+	  "Day 1"    = 2 
+	  "Day 8"    = 3 
+	  "Day 15"   = 4 
+	  "Day 29"   = 5 
+	  "Day 36"   = 6 
+	  "Day 43"   = 7 
+	  "Day 57"   = 8 
+	  "Day 209"  = 9 
+	  "Day 394"  = 10
+	  ; 	
+	
+	value $ AWRANGE 
+	  "Day 1"    =  "<=1"
+	  "Day 8"    =  "Day 2 - Day 11"
+	  "Day 15"   =  "Day 12 - Day 22" 
+	  "Day 29"   =  "Day 23 - Day 32" 
+	  "Day 36"   =  "Day 33 - Day 39" 
+	  "Day 43"   =  "Day 40 - Day 50"
+	  "Day 57"   =  "Day 51 - Day 133"
+	  "Day 209"  =  "Day 134 - Day 301"
+	  "Day 394"  =  ">= Day 302"
+	  Other = ' '
+	  ; 
+	  
+	  invalue AWTARGET
+	  "Day 1"    = 1
+	  "Day 8"    = 8
+	  "Day 15"   = 15 
+	  "Day 29"   = 29
+	  "Day 36"   = 36
+	  "Day 43"   = 43
+	  "Day 57"   = 57 
+	  "Day 209"  = 209 
+	  "Day 394"  = 394
+	  ; 
+
+run;
+
+**Merge supplemental data onto parent domain**;
+%revsupp(
+	libin=trans,
+	libout=work,
+	ds=faot,
+	supp=suppfaot,
+	outds=faot,
+	delsupp=N,
+	movsupp=N,
+	maploc=&G_PROJECTPATH.\&G_toplevel.\Databases\Transformed,
+	mapspec=&G_NICKNAME._mapping_spec.xlsx
+);
+%revsupp(
+	libin=trans,
+	libout=work,
+	ds=er,
+	supp=supper,
+	outds=er,
+	delsupp=N,
+	movsupp=N,
+	maploc=&G_PROJECTPATH.\&G_toplevel.\Databases\Transformed,
+	mapspec=&G_NICKNAME._mapping_spec.xlsx
+);
+	
+	%revsupp(
+	libin=trans,
+	libout=work,
+	ds=ss,
+	supp=,
+	outds=ss,
+	delsupp=N,
+	movsupp=N,
+	maploc=&G_PROJECTPATH.\&G_toplevel.\Databases\Transformed,
+	mapspec=&G_NICKNAME._mapping_spec.xlsx
+);
+	 
+	
+**INSERT CODE TO GENERATE DATASET**;
+
+/*Initialize non existing supp variables, subset, and keep only relevant variables for easier processing*/
+ 
+data ss;
+*for instance when SSCAT is not in source dataset;
+/*sscat = '';*/
+	set ss;
+if 	upcase(SSCAT) not in ('SAFETY CALL');
+run;
+
+
+data foat1;
+	set faot;
+   if  FACAT in ('COVID-19 SYMPTOMS');
+run;
+
+
+
+data foatun;
+ set foat1;
+ if find(visit ,"Safety Call");
+ if   find(visit,"Unscheduled");
+run;
+
+
+data notsafety;
+ set foat1;
+ if not find (visit ,"Safety Call");
+run;
+
+data foat;
+ set notsafety foatun;
+run;
+
+
+data er1;
+	set er;
+   if upcase(ERCAT) in ('COVID-19 EXPOSURE');
+run;
+
+
+data eruns;
+ set er1;
+ if find(visit ,"Safety Call");
+ if find(visit,"Unscheduled");
+run;
+
+
+data ernot;
+ set er1;
+ if not find (visit ,"Safety Call");
+run;
+
+data er;
+ set ernot eruns;
+run;
+
+
+
+
+
+*** Combine faot and er;
+data faot_er;
+    length exposeot sympoth SSCAT $200 srcdom $20 SRCVAR $50;
+    set foat (in=faot where = (FACAT in ('COVID-19 SYMPTOMS')))
+        er   (in=er where = (ERCAT in ('COVID-19 EXPOSURE')))
+        ss   (in=ss where = (strip(SSCAT) not in ('SAFETY CALL')));
+        
+        *Source variables.;
+        if faot then do;
+          SRCSEQ = FASEQ; 
+          SRCVAR = 'FASTRESC';
+        end;
+        if er then do;
+	      SRCSEQ = ERSEQ; 
+          SRCVAR = 'EROCCUR';
+        end;
+        if ss then do;
+	      SRCSEQ = SSSEQ; 
+          SRCVAR = 'SSSTRESC';
+          if SSTESTCD = 'COVIDSYM' then SSCAT = 'COVID-19 SYMPTOMS';
+          if SSTESTCD = 'COVID'    then SSCAT = 'COVID-19 EXPOSURE';          
+        end;
+        SRCDOM = DOMAIN;
+run;
+
+proc sql;
+    create table adcov0 as
+    select distinct a.usubjid, a.studyid, a.subjid, coalesce(faseq, erseq, ssseq) as aseq,
+            coalesce(facat, ercat, sscat) as parcat1 length= 50,
+            coalesce(faobj, erterm, sstest) as param, visit, visitnum,
+    fatestcd, fatest, fadtc, sympoth, exposeot, coalesce(fastresc, eroccur,SSSTRESC) as avalc length = 50,ssdtc, 
+    erstdtc, symptdtc,erdtc,srcdom, srcseq, srcvar,erdur,
+    b.tr01sdt
+    from faot_er as a
+    left join adb.adsl as b
+    on a.usubjid = b.usubjid;
+ 
+ *Duration;
+	create table ERDUR as select distinct 
+	    usubjid, studyid, subjid, aseq,
+            parcat1 ,
+            'DUR' as paramcd length= 8,
+            'Duration' as  param, visit, visitnum,
+            fatestcd, fatest, fadtc, sympoth, erstdtc, erdur, symptdtc,erdtc,
+            srcdom, 
+		    srcseq, 
+		    'ERDUR' as srcvar length = 50, 
+		    tr01sdt
+    from adcov0
+    where erdur ne '';
+quit;
+
+   
+proc sort data = erdur;
+	by usubjid visitnum fadtc srcseq;
+run;
+proc sort nodupkey; 
+	by usubjid visitnum fadtc;
+run;
+
+*** Process non-derived parameters;
+
+data adcov1(drop = tr01sdt) adcov2(drop=tr01sdt);
+    length paramcd $8 param othspy $200 parcat1 avalc $50;
+    set adcov0 (drop = erdur) ERDUR;
+
+    if PARAM='Family member' then paramcd = 'EXPFAM';
+    else if param = 'Health Care Facility' then paramcd = 'EXPHCF';
+    else if param = 'Other exposure' then paramcd = 'EXPOTH';
+    else if param = 'Social setting' then paramcd = 'EXPSOC';
+    else if param = 'Travel' then paramcd = 'EXPTRAV';
+    else if param = 'Work' then paramcd = 'EXPWORK';
+    else if param =  'The participant had close contact with a person known to have SARS-CoV-2 infection or COVID-19' then paramcd = 'CONTACT';
+    else if param =  'Cough' then paramcd = 'COUGH';
+    else if param =: 'Shortness' then paramcd = 'SOB';
+    else if param =  'Fever' then paramcd = 'FEVER';
+    else if param =  'Sore Throat' then paramcd  = 'SORETHRT';
+    else if param =: 'Chest' then paramcd = 'CHESTTP';
+    else if param =: 'Headache' then paramcd = 'HEADACHE';
+    else if param =  'Lethargy' then paramcd = 'LETHARGY';
+    else if param =  'Myalgia' then paramcd = 'MYALGIA';
+    else if param =  'Anosmia' then paramcd = 'ANOSMIA';
+    else if param =  'Dysgeusia' then paramcd = 'DYSGEUSI';
+    else if param =  'Chills' then paramcd = 'CHILLS';
+    else if param =: 'Repeated' then paramcd = 'REPTSHAK';
+    else if param =  'Other Symptoms' then paramcd = 'OTHSYMPT';
+    else if param =  'COVID-19' then paramcd = 'COVID';
+    else if param =  'Exposed to COVID-19' then paramcd = 'EXPCOVID';
+    else if param =  'Participant COVID-19 Symptomatic' then paramcd = 'COVIDSYM';
+    else put         'Unmapped param! Check ' param=;
+
+
+    if param = 'Duration' then do;
+    	aval  = input(compress(erdur,,'kd'), best.);
+    	avalC = strip(compress(erdur,,'kd'));
+    end;
+    if compress(erdur, , 'd') not in ('' 'PD') then put 'ALERT_P: Check derivation of AVAL for 'ERDUR = ;
+    if length(erstdtc) >= 10  then exposedt = input(erstdtc, yymmdd10.);
+    if paramcd ne 'CONTACT' then call missing(exposedt);
+
+
+    if paramcd = 'OTHSYMPT' and avalc = 'Y' then othspy = sympoth;
+    else if paramcd = 'EXPOTH' and avalc = 'Y' then othspy = exposeot;
+
+    if length(fadtc) >= 10 then adt = input(substr(fadtc, 1, 10), yymmdd10.);
+    else if length(erdtc) >=10 then adt = input(substr(erdtc, 1, 10), yymmdd10.);
+    else if length(ssdtc) >=10 then adt = input(substr(ssdtc, 1, 10), yymmdd10.);
+
+    if adt >= tr01sdt > . then ady = adt - tr01sdt + 1;
+    else if . < adt <tr01sdt then ady = adt - tr01sdt;
+
+    if paramcd = 'COVID' and avalc = 'Y' then symptdt = input(symptdtc, yymmdd10.);
+    else sympdt = .;
+
+	if paramcd ne 'OTHSYMPT' then output adcov1;
+	else output adcov2;
+run;
+
+
+*** Collapse OTHSYMP records;
+proc sort data= adcov2;
+	by usubjid adt visitnum visit descending avalc srcseq aseq;
+run;
+
+data adcov2 
+ (drop=othspy aseq srcseq avalc rename = (othspy_holder = othspy aseq_holder = aseq  srcseq_holder=srcseq avalc_holder = avalc)) ;
+	set adcov2;
+	length othspy_holder $1000;
+	retain othspy_holder aseq_holder srcseq_holder avalc_holder;
+	by usubjid adt visitnum visit;
+	
+	if first.usubjid then do;
+		othspy_holder = othspy; 
+		aseq_holder = aseq; 
+		srcseq_holder = srcseq;
+	        avalc_holder = avalc;
+	end;
+	if first.visitnum then do; 
+		if avalc = 'Y'  then do;
+			othspy_holder = othspy; 
+			aseq_holder = aseq; 
+			srcseq_holder = srcseq;
+			avalc_holder = avalc;
+		end;
+		else do;
+			avalc_holder = avalc;
+			srcseq_holder = srcseq;
+		end;
+	end;
+	else do;
+		if avalc = 'Y' then do;
+			othspy_holder = strip(othspy_holder) ||", "|| strip(othspy);  
+			avalc_holder = avalc;
+		end;
+		if avalc_holder = 'N' then do;
+			srcseq_holder = srcseq;			
+			othspy_holder = othspy; 
+		end;
+	end;
+	
+	if last.visitnum;
+run; 
+data adcov2;
+	set adcov2; 
+	if avalc = 'N' then othspy = '';
+run;
+
+*** T2FSYMP;
+proc sql;
+    /*Get the earliest exposure merged to all exposedt then get those earlier than covid symptom*/
+    create table adcov3_1(where = (. < exposedt <= symptdt)) as
+    select a.*, exposedt 
+    from (select distinct studyid, usubjid, symptdt, ady
+                from adcov1
+                where paramcd = 'COVID' and avalc = 'Y'
+                group by usubjid
+                having symptdt = min(symptdt) /*earliest exposure to COVID*/) as a
+         left join
+         (select usubjid, exposedt
+                from adcov1
+                where ~missing(exposedt)) as b
+        on a.usubjid = b.usubjid;
+
+    /*Getting the latest*/
+    create table adcov3 as
+    select distinct studyid, usubjid, symptdt - exposedt + 1 as T2FSYMP
+        from adcov3_1
+        group by usubjid
+        having exposedt = max(exposedt);
+quit;
+
+
+*** append;
+data adcov4(drop= othspy rename=(n_othspy = othspy));
+	length n_othspy $200;
+    set adcov2 adcov1;
+
+	if length(strip(othspy)) > 200 then put 'ALERT_R: Length of othspy exceeds 200 ' usubjid = visit = othspy =;
+
+	n_othspy = othspy;
+run;
+proc sql;
+    create table adcov5 as
+    select distinct a.*, T2FSYMP from adcov4 as a left join adcov3 as b on a.usubjid = b.usubjid;
+quit;
+ 
+*** AVISIT repated variables;
+ data adcov6;
+ length AVISIT $50.;
+ 	set adcov5;
+ 	
+*AVISIT derivation;	
+	*AVISIT(N); 
+	    if index(visit, 'Unsched')=0 and index(visit, 'Day')> 0 then AVISIT ='Day '||strip(scan(visit,4,' ') );
+		else if ADY>1 and index(visit, 'Unsched')>0 then do;
+				 if  1< ADY<=11     then AVISIT = 'Day 8'; 	
+			else if  12<=ADY<=22    then AVISIT = 'Day 15'; 
+			else if  23<=ADY<=32    then AVISIT = 'Day 29'; 
+			else if  33<=ADY<=39    then AVISIT = 'Day 36'; 
+			else if  40<=ADY<=50    then AVISIT = 'Day 43'; 
+			else if  51<=ADY<=133   then AVISIT = 'Day 57'; 
+			else if  134=<ADY<=301  then AVISIT = 'Day 209'; 
+			else if  ADY>=302       then AVISIT = 'Day 394';			
+		end;
+		AVISITN = input(avisit, ??avisitn.);
+run;
+	
+proc sort data = adcov6;
+	by usubjid avisitn  ady; 
+run;
+
+data adcov7;
+length AWRANGE $30.;
+	set adcov6;
+	by usubjid avisitn ady;
+	retain check_visit check_avisitn ;
+	
+	*Set for unscheduled visits that came before scheduled;
+	if first.usubjid then do;
+		check_visit = ady;
+		check_avisitn = avisitn;
+	end;
+	if Check_visit < ady then do;
+		check_visit = ady; 
+		check_avisitn = avisitn; 
+	end; 
+	if index(visit,'Unsched') > 0 and Check_visit >= ady and check_avisitn < avisitn then do;
+		AVISIT  = '' ;
+		AVISITN = .  ;
+	end; 
+		
+	*AWRxxxx;
+	AWRANGE  = put(AVISIT,$AWRANGE.);
+	AWTARGET = input(AVISIT,??AWTARGET.);
+	if nmiss(AWTARGET, ADY) = 0 then do;
+		AWTDIFF = abs(ADY - AWTARGET);
+		AWU     = 'DAYS';
+	end;
+run;
+proc sort  data =adcov7 out = anl01f_OTH;
+	by usubjid parcat1 paramcd avisit descending adt visitnum descending  aseq;  
+	where avalc not in ('Y' 'N' '') and avisit ne '';
+run; 
+proc sort nodupkey;
+	by usubjid parcat1 paramcd avisit; run;
+run;
+ 
+data anl01fl_NY;
+	set adcov7;
+	where  avalc in ('Y' 'N') and avisit ne '';
+	
+	 if index(VISIT,' Unsch') > 0 then ID = 2;
+	 else ID = 1;
+run;
+proc sort;
+	by usubjid parcat1 paramcd avisit descending avalc ID visitnum descending adt   aseq;   
+run; 
+proc sort  data =anl01fl_NY nodupkey;
+	by usubjid parcat1 paramcd avisit; run;
+run;
+
+data anl01fl;	
+	set anl01f_OTH anl01fl_NY;
+run;
+
+*** ANL01FL derivation;
+proc sql;
+    create table &dsetname. (drop = subjid) as
+    select a.*, anl01fl 
+    from adcov7 as a
+         left join 
+         (select distinct usubjid, aseq, parcat1, paramcd, visit , avisit, adt, 'Y' as anl01fl
+                from anl01fl 
+                group by usubjid, parcat1, paramcd, visit, avisit
+                having adt = max(adt) and aseq = max(aseq)) as b
+        on a.usubjid = b.usubjid and a.parcat1 = b.parcat1 and a.paramcd = b.paramcd and a.visit = b.visit  and a.avisit = b.avisit and a.aseq = b.aseq;
+quit;
+
+
+** quality checks;
+proc sql;
+    create table qcheck as
+    select usubjid, parcat1, paramcd, visit, visitnum, adt, aval, avalc, count(*) as ctr
+    from &dsetname.
+    group by usubjid, parcat1, paramcd, visit, visitnum, adt;
+quit;
+
+data _null_;
+    set qcheck;
+    FORMAT adt yymmdd10.;
+    if ctr > 1 then put 'ALERT_R: There are more than one record per USUBJID, PARCAT1, PARAMCD, VISIT, ADT. Please check '
+                        USUBJID = PARCAT1 = PARAMCD = VISIT = ADT = ;
+    if visit =: 'Unsch' then put 'ALERT_R: There are unscheduled visits. Please raise to LS: '
+                        USUBJID = PARCAT1 = PARAMCD = VISIT = ADT = ;
+run;
+
+proc sort data = &dsetname.;
+    by usubjid parcat1 paramcd visitnum fadtc aseq;
+run; 
+
+data &dsetname.;
+	merge &dsetname. (in=a) adb.adsl (in=b keep = usubjid);
+	by usubjid;
+	if a and b;
+run;
+
+**Generate final dataset by updating certain attributes. Optionally merge common variables & create sequence variable as needed**;
+%adam_dataset_update(
+	ds=&dsetname.,
+	libin=work,
+	libout=output,
+	adsllib=adb,
+	addcomvar=Y,
+	addseq=,
+	dropinfmt=Y,
+	mapspecfile=&ADAM_SPEC,
+	maploc=&ADAM_SPEC_LOC,
+	debug=Y
+	);
+  
+%macro dod;
+**Generate Value Level Metadata values for the ad<xx> dataset**;
+% dod_vlm(        
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&G_PROJECTPATH.&G_TOPLEVEL.\Documents\Specs\,
+	specname=&G_NICKNAME._ADaM_Spec.xlsm,
+	debug=N
+	);
+
+**Generate Enhanced Controlled Terminology for the ad<xx> dataset**;
+% dod_enhcd_ct(            
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&G_PROJECTPATH.&G_TOPLEVEL.\Documents\Specs\,
+	specname=&G_NICKNAME._ADaM_Spec.xlsm,
+	map_ct_nm=,
+	map_ct_loc=,
+	debug=N
+	);
+%mend;

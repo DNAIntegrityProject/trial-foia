@@ -1,0 +1,1067 @@
+﻿*************************************************************************************************;
+*           CLIENT: ModernaTX, Inc.
+*         PROTOCOL: mRNA-1273-P301
+*          PURPOSE: Create Macro for Table 14.2.4.1.1.1.1.x    
+* 	Summary of Binding Antibody Specific to SARS-CoV-2 Spike Protein by MSD by Baseline Elecsys Result
+*     INPUT FILES: ADaM datasets
+*     OUTPUT FILES: 
+*      USAGE NOTES: 
+*************************************************************************************************;
+*  Copyright 2020 Pharmaceutical Product Development, Inc.
+*  All Rights Reserved.
+*************************************************************************************************;
+
+**temp where;
+%include "martz_default.sas";
+%include "mclopperis.sas";
+%include "mgm_ci.sas";
+
+%let total_display=No;
+%let cohortn=BASEN;
+
+%let _default_indata = adis;
+%let _default_trtvar = trt01pn;
+%let _default_below_bign = ;
+%let _DEFAULT_COL1_WIDTH_PCNT=30;
+
+
+** format individual;
+proc format;
+  invalue trt_ci
+        "Placebo"=1
+        "mRNA-1273"=2
+        "mRNA-1273 Total"=99
+        " " =8
+        ;
+  invalue scov2bln_ci
+        'Negative'=1
+        'Positive'=2
+        'Missing'=3
+        'Overall'=9
+        ;
+	value scov2bln
+	    1='Negative'
+	    2='Positive'
+		3='Missing'
+/*		9='Overall'*/
+		;
+  value $stat_fmt (NOTSORTED)
+        'n'     = "n [1]"
+        'nx'  = 'N1'
+        'MED'   = 'Median'
+        'MINMAX'= 'Min, Max'
+        ;
+
+  value $stat_n1_fmt (NOTSORTED)
+        'N'     = 'N1'
+        'MEAN'  = 'GM Fold-Rise'
+        ;
+  invalue avis_in
+      "Baseline"=1
+      "Day 29"=3
+      "Day 57"=4
+      " "=8
+      other=5
+      ;
+run;
+
+
+**************************************************************************************************************************************************************;
+*BIGN*******************************************************************************************************************************************************;
+*************************************************************************************************************************************************************;
+data adsl;
+ set adb.adsl;
+ array ta(2) TRTAN TRTPN;
+ if missing(trt01an) then trt01an=8;
+ if missing(trt01pn) then trt01pn=8;
+ if missing(trtan) then trtan=8;
+ if missing(trtpn) then trtpn=8;
+
+ if upcase(&cohortc.)='NEGATIVE' then BASEN=1;
+	 else if upcase(&cohortc.)='POSITIVE' then BASEN=2;
+	 else if &cohortc. eq '' then BASEN=3;
+ format BASEN scov2bln.;
+ output;
+run;
+
+
+/*check pop obs*/
+proc sql noprint;
+  select count(*) 
+  into :pop
+  from adb.adsl
+  where &popfl.="Y";
+quit;
+%put &pop.;
+%if &pop ^= 0 %then %do;
+  %ma_bign
+  	( in_data = adsl
+  	, in_where = &popfl.="Y"
+  	, subgroup = &cohortn.
+  	);
+
+
+
+
+
+*Bring in ADIS******************************************************************************************************************************************;
+*****************************************************************************************************************************************************;
+data adis;
+  set adb.adis;
+  where &where_adis. ;
+  /*for subtitle value*/
+  length newparam $200;
+ newparam = strip(PARAM)||" (LLOQ: "||strip(put(ISLLOQ,best.))||', ULOQ: '||strip(put(ISULOQ,best.))||')'; 
+ if nmiss(ISLLOQ,ISULOQ)=2 then newparam = strip(PARAM); 
+
+ if upcase(&cohortc.)='NEGATIVE' then BASEN=1;
+	 else if upcase(&cohortc.)='POSITIVE' then BASEN=2;
+	 else if &cohortc. eq '' then BASEN=3;
+ format BASEN scov2bln.;
+ output;
+
+run;
+
+
+**SUBSET FOR NON_LOG RECORDS;
+data adis_nonlog;
+set adis;
+  if substr(PARAMCD,1,1) ='L' then delete;
+run;
+
+
+*subtitle format;
+%mu_create_format
+        (in_data       = adis_nonlog
+        ,short_var     = paramcd 
+        ,long_var      = newparam 
+        ,format_name   = $param_ 
+        ,add_to_format =    
+        ,format_where  = 
+        ,delim         = !
+        ) *;
+**Add VISIT LABEL ROWS;
+%mu_create_format
+        (in_data       = adis_nonlog
+        ,short_var     = avisitn 
+        ,long_var      = AVISIT
+        ,format_name   = avisit_ 
+        ,add_to_format =    
+        ,format_where  = 
+        ,delim         = !
+        ) *;
+
+ %let byvar_fmt =  avisit_. ;
+
+proc datasets nolist;
+  modify adis_nonlog;
+   format AVISITN avisit_.;
+  run;
+quit;
+
+
+*****************************WHEN OBS NE 0 *******************************************************************************************************************************;
+%*if &obs ne 0 %then %do;
+*****************************************************************************************************************************************************************************;
+
+**************************************************************************************************************************************************************;
+**PART1: PARAM doesn’t contain ‘LOG10’***********************************************************************************************************************;
+**************************************************************************************************************************************************************;
+*** Precision ***;
+%let precision_data = &_default_indata;
+%let precision_by = paramcd;
+%let precision_var = ;
+%let precision_fmt = ;
+%let precision_val = ;
+
+* n[1],median, min, max;
+** PRECISION - Create a data set to control the precision of the display of an analysis variable;
+%ma_summ_stats_precision
+	(in_data                = &PRECISION_DATA
+	,var                    = AVAL 
+	,precision_var          = &precision_var
+	,byvars                 = &precision_by
+	,fmt_override           = &precision_fmt
+	,out_data               = PRECISION_DATA
+	,help                   = &_default_help
+	,debug                  = &_default_debug
+	);
+
+data PRECISION_DATA;
+set PRECISION_DATA;
+IF PRECISION >=2 then PRECISION=2;
+RUN;
+
+
+%ma_summ_stats
+             (  in_data   = adis_nonlog
+              , in_where  = ~missing(aval) 
+              , usubjid   = usubjid
+              , trtvar    = &_default_trtvar.
+              , vars      = aval
+              , SUBGROUP  = &cohortn.
+              , byvars    = paramcd  avisitn
+              , summ_stats_additional =  
+              , out_data  = SUMM_STATS1
+              );
+
+%ma_summ_stats_rules
+             (  in_data = SUMM_STATS1
+              , byvars =  paramcd
+              , out_data = MA_SUMM_STATS_RULES
+              ) ;
+
+%ma_summ_stats_display
+                    ( in_data                = SUMM_STATS1 
+                    , rules_data             = MA_SUMM_STATS_RULES
+                    , rules_by               = paramcd 
+                    ,precision_data          = PRECISION_DATA 
+					,precision_by            = paramcd 
+					,precision_val           =  
+                    , bign_data              = bign 
+                    , in_where               = 
+                    , subgroup               = &cohortn.
+                    , stat_label_fmt         = stat_fmt.
+                    , na_text                = NA 
+                    , separator              = %str(,)
+                    , display                = V
+                    , out_data               = SUMM_DISPLAY1
+                    , out_data_where         =
+                    , supress_zero_row       = Y 
+                    , help                   = &_default_help
+                    , debug                  = &_default_debug  
+                    );
+
+* N1;			
+/* Select subjects with non-missing aval in both baseline and post-baseline;*/
+proc sort data = adis nodupkey out=sub_base(keep=usubjid);
+by usubjid;
+where ablfl='Y' and ^missing(aval) and index(upcase(param),'LOG10')=0;
+run;
+proc sort data = adis nodupkey out=sub_post(keep=usubjid);
+by usubjid;
+where ablfl^='Y' and ^missing(aval) and index(upcase(param),'LOG10')=0;
+run;
+
+data adis_N1;
+merge adis_nonlog(in=main) sub_base(in=a) sub_post(in=b);
+  by usubjid;
+  if a and b and main;
+run;
+
+
+%ma_summ_stats
+             (  in_data   = adis_N1
+              , in_where  = ~missing(aval) 
+              , usubjid   = usubjid
+              , trtvar    = &_default_trtvar.
+              , vars      = aval
+              , SUBGROUP  = &cohortn.
+              , byvars    = paramcd  avisitn
+              , summ_stats_additional = 
+              , out_data  = SUMM_STATS2
+              );
+
+%ma_summ_stats_rules
+             (  in_data = SUMM_STATS2
+              , byvars =  paramcd
+              , out_data = MA_SUMM_STATS_RULES
+              ) ;
+%ma_summ_stats_display
+                    ( in_data                = SUMM_STATS2 
+                    , rules_data             = MA_SUMM_STATS_RULES
+                    , rules_by               = paramcd 
+                    , precision_val          = 2 
+                    , bign_data              = bign 
+                    , in_where               = 
+                    , subgroup               = &cohortn.
+                    , stat_label_fmt         = stat_n1_fmt.
+                    , na_text                = NA 
+                    , separator              = %str(,)
+                    , display                = V
+                    , out_data               = SUMM_DISPLAY2
+                    , out_data_where         =
+                    , supress_zero_row       = Y 
+                    , help                   = &_default_help
+                    , debug                  = &_default_debug  
+                    );
+
+
+** manipulate stat dataset as trans_pcnt;
+data part1_stat;
+  set SUMM_DISPLAY1(in=a rename=(stat_value_1=n_pcnt_1  stat_value_2=n_pcnt_2 stat_value_8=n_pcnt_8  stat_value_99=n_pcnt_99) )
+	 SUMM_DISPLAY2(in=b rename=(stat_value_1=n_pcnt_1  stat_value_2=n_pcnt_2 stat_value_8=n_pcnt_8  stat_value_99=n_pcnt_99) );
+
+  length COL1 $25 _section_ _order1_ 8;
+   COL1=stat_label;
+    if a then _order1_=stat_row*10;
+    if b then _order1_=45;
+  if stat_row =2 then delete; /*delete extra output from N1 calculation*/
+run;
+
+proc sort data=part1_stat;by &cohortn.  paramcd  avisitn;run;
+
+
+
+**************************************************************************************************************************************************************;
+***PART 2: Seroconversion Row**************************************************************************************************************;
+********************************************************************************************************************************************;
+data bign2;
+set SUMM_STATS2;
+rename var1_n=denom;
+	bign_index='_'||strip(&_default_trtvar.);
+keep &cohortn. &subgroup. avisitn paramcd var1_n &_default_trtvar.   bign_index;
+run;
+
+%macro countoneall(inwhere=, text=, order=, dsout=);
+%ma_count_one_row
+      (  in_data            = adis_N1
+      , in_where            = &inwhere.
+      , trtvar              = &_default_trtvar.
+      , DEFINE_TOTAL_GROUPS = &_default_define_total_groups.
+      , TRTVAR_PRELOADFMT   = &_default_trtvar_preloadfmt. 
+      , usubjid             = &_default_usubjid.
+      , subgroup            = &cohortn.
+      , BYVARS              = paramcd avisitn
+/*	,BYVARS_PRELOADFMT= $param_ avisit_*/
+	 , bign_in_data        = BIGN
+      , text_for_column1    = &text.
+      , indent_column1      =  
+      , display_zero_row    = Yes 
+      , _section_           = 1
+      , _order1_            = &order.
+      , header              = 
+      , header_indent       = 0 
+      , get_subj_count      = Yes
+      , get_event_count     = No
+      , out_data            = ONE_ROW_COUNT 
+      , debug               =
+      , help                =  );
+ 
+%ma_n_pcnt
+     (  in_data =  ONE_ROW_COUNT 
+      , in_denom_data = BIGN2
+      , in_denom_var = denom
+      , in_denom_merge_vars = &_default_trtvar PARAMCD AVISITN
+      , subgroup = &cohortn.
+      , no_pcnt_if =
+      , out_n_pcnt_format = &_default_out_n_pcnt_format
+      , trigger_pcnt_sign = &_default_trigger_pcnt_sign
+      , trigger_tight_paren = &_default_trigger_tight_paren
+      , trigger_n_space_pcnt = &_default_trigger_n_space_pcnt
+      , additional_var = 
+      , no_additional_var_if =
+      , additional_var_format =
+      , out_display_var_split = no
+      , blank_for_zero_denom = &_default_blank_for_zero_denom 
+      , out_data = N_PCNT
+      , out_pcnt = pcnt
+      , out_display_var = n_pcnt
+      , debug =
+      , help =    );
+
+*** Transpose treatments to columns;
+%mu_transpose
+ (  in_data = N_PCNT
+  , transpose_by = &cohortn. paramcd AVISITN _section_ _skipvar_ _order1_ _indent_ col1
+  , transpose_vars = n_pcnt
+  , transpose_id =  &_default_trtvar.
+  , out_data = &dsout.
+ );
+%mend;
+
+/*OPTIONS MPRINT;*/
+%countoneall(inwhere= CRIT6FL='Y' , text=%nrbquote(n (%) [4]), order= 80, dsout= part2cnt1);
+%countoneall(inwhere= CRIT1FL='Y' , text=%nrbquote(n (%) [4]), order= 100, dsout= part2cnt2);
+%countoneall(inwhere= CRIT2FL='Y' , text=%nrbquote(n (%) [4]), order= 120, dsout= part2cnt3);
+%countoneall(inwhere= CRIT3FL='Y' , text=%nrbquote(n (%) [4]), order= 140, dsout= part2cnt4);
+
+data part2_all;
+set part2cnt1 part2cnt2 part2cnt3 part2cnt4;
+run;
+
+/*>= 2-fold Increase from Baseline [5]*/
+
+/*dummy all cohort,paramcd,avisit toget records when no output from stats macro*/
+proc freq data=adis_nonlog;
+table  &cohortn.*avisitn*paramcd/out=dummy;
+run;
+
+data dummy_part1;
+set dummy(drop=count percent);
+_order1_ = 80; col1 = "n (%) [4]"; output;
+_order1_ = 100; col1= "n (%) [4]"; output;
+_order1_ = 120; col1= "n (%) [4]"; output;
+_order1_ = 140; col1= "n (%) [4]"; output;
+run;
+
+proc sort data=dummy_part1; by  &cohortn. avisitn paramcd _order1_;run;
+proc sort data=part2_all; by  &cohortn. avisitn paramcd _order1_; run;
+
+data part2_cnt;
+merge part2_all(in=a drop=col1) dummy_part1(in=b);
+by  &cohortn. avisitn paramcd _order1_;
+if a or b;
+if n_pcnt_1= '' then n_pcnt_1= '     0';
+if n_pcnt_2= '' then n_pcnt_2= '     0';
+if n_pcnt_8= '' then n_pcnt_8= '     0';
+if n_pcnt_99= '' then n_pcnt_99= '     0';
+run;
+
+proc sort data=part2_cnt; by  &cohortn.  paramcd avisitn _order1_; run;
+
+
+
+**************************************************************************************************************************************************************;
+*PART 3: 95% CI*****************************************************************************************************************************************************;
+**************************************************************************************************************************************************************;
+** Compute 95% CI for GM and GMFR;
+%GMT_GMR_CI (lib=ADB, datain= ADIS, subset= &sub_gmt., trt=TRT01P, cohort=&cohortc., dataout=summary1,grvar=); 
+
+*set all 95%CI output and derive GMT_CI,GMR_CI;
+data summary10;
+set summary1(rename=(GMT=_GMT GMR=_GMR));
+/*treatment,visit,cohort*/
+  &_default_trtvar.=input(trt,??trt_ci.);
+  &cohortn.=input(cohort,??scov2bln_ci.);
+  if upcase(cohort)='OVERALL' then delete;
+  format &cohortn. scov2bln. ; 
+  avisitn=input(avisit, avis_in.);
+/*convert log10 PARAMCD back to paired PARAMCD to be consistent with other outputs*/
+    if PARAMCD="LV58IG1S" then PARAMCD="V58IG1S";
+	else if PARAMCD="LV58IG2S" then PARAMCD="V58IG2S";
+	else if PARAMCD="LV58IG3S" then PARAMCD="V58IG3S";
+	else if PARAMCD="LV58IG4S" then PARAMCD="V58IG4S";
+	else if PARAMCD="LV58IGMS" then PARAMCD="V58IGMS";
+	else if PARAMCD="LV58IGAS" then PARAMCD="V58IGAS";
+/*	else if PARAMCD="LV58IGGS" then PARAMCD="V58IGGS";*/
+	else if PARAMCD="LV65IGGS" then PARAMCD="V65IGGS"; 
+	else if PARAMCD="LV66IGGN" then PARAMCD="V66IGGN";
+	else if PARAMCD="LS2PIGG" then PARAMCD="S2PIGG";
+	else if PARAMCD="LRBDIGG" then PARAMCD="RBDIGG";
+	else if PARAMCD="LNPIGG" then PARAMCD="NPIGG";
+	else if PARAMCD="L10PVN50" then PARAMCD="PSVNT50";
+	else if PARAMCD="L10PVN80" then PARAMCD="PSVNT80";
+if PARAMCD eq '' then delete;
+run;
+
+proc freq data=adb.adis ;
+table  paramcd*param/out=freqck;
+where PARCAT1='Serum SARS-CoV-2 Neutralizing Antibodies' ;
+run;
+**DECIMAL: count max decimal for each PARAMCD;
+data decimal;
+set adis_nonlog;
+  len_aval=lengthn(scan(put(aval,best.),2,'.'));
+  len_chg=lengthn(scan(put(aval,best.),2,'.'));
+  keep paramcd aval len_aval len_chg param;
+run;
+
+proc sql noprint;
+create table dec_aval as
+select max(len_aval) as prec_aval, paramcd
+from decimal
+group by paramcd
+order by paramcd;
+
+create table dec_chg as
+select max(len_chg) as prec_chg, paramcd
+from decimal
+group by paramcd
+order by paramcd;
+quit;
+
+
+*For Summary1 output********************************************************************************************;
+proc sort data=summary10; by paramcd;run;
+data summary11;
+merge summary10(in=a) dec_aval dec_chg ;
+by paramcd;
+if a;
+run;
+
+data summary11;
+length gmt ci_gmt ci_gmr $50;
+set summary11;
+
+if prec_aval = 0 then do;
+  if _gmt ne  . then gmt = strip(put(_gmt,30.1));
+  if cmiss(lowergmt,uppergmt)=0 then do; 
+	ci_gmt="("||strip(put(lowergmt,30.2))||', '||strip(put(uppergmt,30.2))||")";
+	if uppergmt<0.001 then ci_gmt="("||strip(put(lowergmt,30.2))||", <0.001)";
+  end;
+  if cmiss(lowergmr,uppergmr)=0 then do; 
+     ci_gmr="("||strip(put(lowergmr,30.2))||', '||strip(put(uppergmr,30.2))||")";
+	if uppergmr<0.001 then ci_gmt="("||strip(put(lowergmr,30.2))||", <0.001)";
+  end;
+end;
+
+if prec_aval >= 1 then do;
+  if _gmt ne  . and  prec_aval =1 then gmt = strip(put(_gmt,30.2));
+     else   if _gmt ne  . and  prec_aval >=2 then gmt = strip(put(_gmt,30.3));
+  if cmiss(lowergmt,uppergmt)=0 then do; 
+	ci_gmt="("||strip(put(lowergmt,30.2))||', '||strip(put(uppergmt,30.2))||")";
+	if uppergmt<0.001 then ci_gmt="("||strip(put(lowergmt,30.2))||", <0.001)";
+  end;
+  if cmiss(lowergmr,uppergmr)=0 then do; 
+	ci_gmr="("||strip(put(lowergmr,30.2))||', '||strip(put(uppergmr,30.2))||")";
+	if uppergmr<0.001 then ci_gmt="("||strip(put(lowergmr,30.2))||", <0.001)";
+  end;
+end;
+
+if _gmr ne  . then do;
+  if prec_chg = 0 then gmr = strip(put(_gmr,30.2));
+  if prec_chg >= 1 then gmr = strip(put(_gmr,30.2));
+end;
+  if cmiss(lowergmr,uppergmr)=2 then ci_gmr ="(NE, NE)";
+  if cmiss(lowergmt,uppergmt)=2 then ci_gmt ="(NE, NE)";
+run;
+
+
+
+*For Summary2 output: keep 3 decimals for SERO 95% CI because it is not derived by using AVAL/CHG*******************************;
+** Compute 95% CI for Seroconversion;
+%clopper2 (lib=ADB,datain=ADIS, trt=TRT01P, cohort=&cohortc., subset= &sub_clopper., crit= CRIT6FL, dataout=summary24,grvar=); 
+%clopper2 (lib=ADB,datain=ADIS, trt=TRT01P, cohort=&cohortc., subset= &sub_clopper., crit= CRIT1FL, dataout=summary21,grvar=);
+%clopper2 (lib=ADB,datain=ADIS, trt=TRT01P, cohort=&cohortc., subset= &sub_clopper., crit= CRIT2FL, dataout=summary22,grvar=); 
+%clopper2 (lib=ADB,datain=ADIS, trt=TRT01P, cohort=&cohortc., subset= &sub_clopper., crit= CRIT3FL, dataout=summary23,grvar=);
+
+%macro process_summary2(dsin=, dsout=);
+data &dsout.;
+set &dsin.;
+length ci_ser $50;
+/*treatment/visit/cohort*/
+  &_default_trtvar.=input(trt,??trt_ci.);
+  &cohortn.=input(cohort,??scov2bln_ci.);
+  if upcase(cohort)='OVERALL' then delete;
+  format &cohortn. scov2bln. ; 
+  avisitn=input(avisit, avis_in.);
+/* 95%CI for Seroconversion*/
+  if cmiss(lowercl,uppercl)=0 then do; ci_ser="("||strip(put(lowercl,12.1))||', '||strip(put(uppercl,12.1))||")"; end;
+  if cmiss(lowercl,uppercl)=2 then ci_ser ="(NE, NE)";
+run;
+%mend;
+%process_summary2(dsin=summary24, dsout=summary224);
+%process_summary2(dsin=summary21, dsout=summary221);
+%process_summary2(dsin=summary22, dsout=summary222);
+%process_summary2(dsin=summary23, dsout=summary223);
+
+
+
+/*transpose all records from gmt and clopper macros*/
+%macro mtrans(in=,var=, out=);
+%mu_transpose
+ (  in_data = &in.
+  , transpose_by = &cohortn. paramcd avisit avisitn  
+  , transpose_vars = &var.
+  , transpose_id =  &_default_trtvar.
+  , out_data = &out.
+ );
+%mend;
+
+%mtrans(in=summary11,var=GMT, out=TRANSP_PCNT_GMT);
+%mtrans(in=summary11,var=GMR, out=TRANSP_PCNT_GMR);
+%mtrans(in=summary11,var=ci_gmt, out=TRANSP_PCNT_cigmt);
+%mtrans(in=summary11,var=ci_gmr, out=TRANSP_PCNT_cigmr);
+%mtrans(in=summary224,var=ci_ser, out=TRANSP_PCNT_ciser4);
+%mtrans(in=summary221,var=ci_ser, out=TRANSP_PCNT_ciser1);
+%mtrans(in=summary222,var=ci_ser, out=TRANSP_PCNT_ciser2);
+%mtrans(in=summary223,var=ci_ser, out=TRANSP_PCNT_ciser3);
+
+
+
+/*set all ci output*/
+data all_ci;
+length col1 $25 n_pcnt_1 n_pcnt_2 n_pcnt_99 $50;
+  set TRANSP_PCNT_gmt(in=a   rename=(gmt_1=n_pcnt_1     gmt_2=n_pcnt_2  	gmt_99=n_pcnt_99  	))
+	 TRANSP_PCNT_cigmt(in=b rename=(ci_gmt_1=n_pcnt_1  ci_gmt_2=n_pcnt_2  ci_gmt_99=n_pcnt_99 )) 
+   	 TRANSP_PCNT_gmr(in=c   rename=(gmr_1=n_pcnt_1 	 gmr_2=n_pcnt_2  	gmr_99=n_pcnt_99 	))
+      TRANSP_PCNT_cigmr(in=d rename=(ci_gmr_1=n_pcnt_1  ci_gmr_2=n_pcnt_2  ci_gmr_99=n_pcnt_99 ))
+      TRANSP_PCNT_ciser4(in=e rename=(ci_ser_1=n_pcnt_1  ci_ser_2=n_pcnt_2  ci_ser_99=n_pcnt_99 ))
+      TRANSP_PCNT_ciser1(in=f rename=(ci_ser_1=n_pcnt_1  ci_ser_2=n_pcnt_2  ci_ser_99=n_pcnt_99 ))
+      TRANSP_PCNT_ciser2(in=g rename=(ci_ser_1=n_pcnt_1  ci_ser_2=n_pcnt_2  ci_ser_99=n_pcnt_99 ))
+      TRANSP_PCNT_ciser3(in=h rename=(ci_ser_1=n_pcnt_1  ci_ser_2=n_pcnt_2  ci_ser_99=n_pcnt_99 ));
+
+   if a then do; _order1_=15 ; COL1="GM Level";end;
+   if b then do; _order1_=16;  COL1= "95% CI [2]";end;
+   if c then do; _order1_=50 ; COL1="GM Fold-Rise";end;
+   if d then do; _order1_=60;  COL1= "95% CI [2]"; end;
+   if e then do; _order1_=90 ; COL1="95% CI [5]";end;
+   if f then do; _order1_=110 ; COL1="95% CI [5]";end;
+   if g then do; _order1_=130 ; COL1="95% CI [5]";end;
+   if h then do; _order1_=150 ; COL1="95% CI [5]";end;
+
+	_section_=1;
+	_skipvar_=1;
+     _indent_=0;
+
+	/*delete GMR,GMR95%CI output for Baseline visit only*/
+	if avisitn=1 and _order1_ in (50,60,90,110,130,150) then delete;
+	/*delete PARAMCD contains 'LOG10')*/
+	if substr(PARAMCD,1,1)='L' then delete; 
+run;
+
+/*dummy all cohort,paramcd,avisit toget records when no output from stats macro*/
+data dummy_stat;
+set dummy;
+length col1 $25 ;
+	 _order1_=15 ; COL1="GM Level";output;
+	 _order1_=16;  COL1= "95% CI [2]";output;
+ 	 _order1_=50 ; COL1="GM Fold-Rise";output;
+	 _order1_=60;  COL1= "95% CI [2]";output;
+	 _order1_=90 ; COL1="95% CI [4]";output;
+run;
+
+proc sort data=dummy_stat; by &cohortn. avisitn paramcd _order1_ col1;run;
+proc sort data=all_ci; by &cohortn. avisitn paramcd _order1_ col1;run;
+
+data part3_ci;
+merge all_ci(in=a) dummy_stat(in=b);
+by &cohortn. avisitn paramcd _order1_ col1;
+if a or b;
+_section_=1;
+/*delete GMR,GMR95%CI output for Baseline visit only*/
+if avisitn=1 and _order1_ in (50,60,90) then delete;
+/*delete records which are not in adis_nonlog dataset: if visit 'Day 29' for Negative and paramcd="V58IGGES" do not exist in adis, then delete from stats macro output*/
+if a and not b then delete;
+run;
+
+
+/*dummy all cohort,paramcd,avisit toget records when no output from stats macro*/
+data dummy_stat;
+set dummy;
+length col1 $25 ;
+	 _order1_=15 ; COL1="GM Level";output;
+	 _order1_=16;  COL1= "95% CI [2]";output;
+ 	 _order1_=50 ; COL1="GM Fold-Rise";output;
+	 _order1_=60;  COL1= "95% CI [2]";output;
+	 _order1_=90 ; COL1="95% CI [5]";output;
+	 _order1_=110 ; COL1="95% CI [5]";output;
+	 _order1_=130 ; COL1="95% CI [5]";output;
+	 _order1_=150 ; COL1="95% CI [5]";output;
+run;
+
+proc sort data=dummy_stat; by &cohortn. avisitn paramcd _order1_ col1;run;
+proc sort data=all_ci; by &cohortn. avisitn paramcd _order1_ col1;run;
+
+data part3_ci;
+merge all_ci(in=a) dummy_stat(in=b );
+by &cohortn. avisitn paramcd _order1_ col1;
+if a or b;
+_section_=1;
+/*delete GMR,GMR95%CI output for Baseline visit only*/
+	if avisitn=1 and _order1_ in (50,60,90,110,130,150) then delete;
+/*delete records which are not in adis_nonlog dataset: if visit 'Day 29' for Negative and paramcd="V58IGGES" do not exist in adis, then delete from stats macro output*/
+if a and not b then delete;
+run;
+
+
+
+
+
+**************************************************************************************************************************************************************;
+*SET ALL *****************************************************************************************************************************************************;
+**************************************************************************************************************************************************************;
+*1.set three parts output;
+data setall0;
+length col1 $50;
+  set part1_stat(in=a) 	 part2_cnt(in=b) 	 part3_ci(in=c);
+  if missing(avisitn) then avisitn=input(avisit,??avis_in.);
+/* delete LOG10PRAMCD and missing PARAMCD rows*/
+  if substr(PARAMCD,1,1)='L' then delete;
+  if paramcd eq '' then delete;
+/*delete N1 count for Baseline visit only*/
+  if avisitn=1 and col1='N1' then delete;
+/*delete Seroconversion for Baseline visit only*/
+  if avisitn=1 and b then delete;
+run;
+
+
+**2.delete extra illeness records: Ilness visit only exist for some paramcd + cohort;
+proc sort data=setall0; by &cohortn.  paramcd  avisitn ;run;
+proc sort data=dummy; by &cohortn.  paramcd  avisitn ;run;
+
+data setall1;
+merge setall0(in=a) dummy(in=b drop=count percent);
+by &cohortn.  paramcd  avisitn ;
+if a;
+if a and not b and avisitn =100 then delete;
+run;
+
+
+*3.Add Seroconversion [3]/>= 2-fold Increase from Baseline [5] rows;
+proc sort data=setall1 nodupkey out=addrows(keep=&cohortn.  paramcd  avisitn _section_ _order1_ col1);
+by &cohortn.  paramcd  avisitn _section_ _order1_;
+where COL1="95% CI [5]";
+run;
+
+data addrows;
+set addrows;
+if _order1_= 90 then col1="Seroresponse [3]";
+if _order1_= 110 then col1=">= 2-fold Increase from Baseline [6]";
+if _order1_= 130 then col1=">= 3-fold Increase from Baseline [6]";
+if _order1_= 150 then col1=">= 4-fold Increase from Baseline [6]";
+_order1_=_order1_-11;
+
+run;
+
+data setall2;
+set setall1 addrows;
+if _section_ eq . then _section_=1;
+run;
+
+
+
+*4.Merge NEWPARAM to data for final sorting in the output, display NEWPARAM alphabetically;
+proc freq data=adis_nonlog;
+table paramcd*newparam/out=ckparam;
+run;
+ proc sort data=setall2; by paramcd;run;
+ proc sort data=ckparam;by paramcd;run;
+ data setall2;
+ merge setall2 ckparam(in=b drop=count percent);
+ by paramcd;
+ run;
+
+
+*5. merge with cohort to get character cohort vairable for figure dataset output ;
+proc freq data=adis_nonlog;
+table &cohortc.*&cohortn./out=cohort;
+run;
+ proc sort data=setall2; by &cohortn.;run;
+ proc sort data=cohort;by &cohortn.;run;
+ data setall;
+ merge setall2 cohort(in=b drop=count percent);
+ by &cohortn.;
+ run;
+
+
+*6. Final sorting before output ;
+
+ **CLIENT NOTES TO REMOVE OVERALL SECTION**;
+ data setall;
+ 	set setall;
+
+	if BASEN = 9 then
+		delete;
+ run;
+
+proc sort data=setall;by &cohortn. newparam avisitn _section_ _order1_;run;
+%mu_get_sort_order(setall);
+
+
+**Output dataset for FIGURES**************************************************************************************************************;
+*keep GM Fold Rise and 95%CI: There is no baseline visit in output because we do not display GMR in baseline;
+data f_&g_deliverableid.;
+retain &cohortn. &cohortc. new: paramcd avisitn avisit col1 n_pcnt_1 n_pcnt_2;
+keep &cohortn.  &cohortc. new: paramcd avisitn avisit col1 n_pcnt_1 n_pcnt_2;
+set setall;
+if AVISIT="Baseline" then AVISIT="Baseline (Day 1)";
+/*if FMTD_AVISITN ne '' then avisit=strip(FMTD_AVISITN);*/
+if _order1_ in (50,60) and BASEN in (1,2,3,9);
+format _all_;
+run;
+
+
+
+%macro continuetable;
+**Add VISIT LABEL ROWS*****************************************************************************************************************************;
+  %mr_add_by_rec
+(in_data                = setall
+,sortvars               = &cohortn.   newparam _section_ avisitn /* Sort order of the input dataset that was just defined in above call to MU_GET_SORT_ORDER. */
+,byvars                 = avisitn /* Variable that is part of Sort Vars and which dictates when extra line is added. */
+,byvarstext             = /* Text that will be used for extra line if it is not driven by the BYVAR. */
+,byvarsfmt              = &byvar_fmt /* If no text is supplied then formatted value will be used for extra line. */
+,ordervar               = _order1_
+,indentspace            = 2
+,addblankrow            =
+,out_data               = ADD_REC
+,colname                = col1
+,help                   = &_default_help
+,debug                  = &_default_debug
+);
+
+
+*change _skipvar_ to add a blank line before Seroconversion [3]/>= 2-fold Increase from Baseline [5] rows in the output;
+proc sort data=ADD_REC; by &cohortn. newparam avisitn _section_ _order1_;run;
+
+
+data ADD_REC1;
+set ADD_REC(drop=_skipvar_);
+retain _skipvar_ ;
+by &cohortn. newparam avisitn _section_ _order1_;;
+  if strip(col1)='Baseline' then col1="Baseline (Day 1)";
+/*  change _skipvar_ to skip a line before Seroconversion rows*/
+  if first.newparam then _skipvar_ =1;
+    else if  _order1_ in (79,99,119,139) then  _skipvar_=_skipvar_+(_order1_+1)/10;
+/*  change _indent_*/
+	if _indent_=2 then _indent_=4;
+	if  _order1_ in (79,99,119,139) then _indent_=2;
+run;
+*Rederive _section_ to consider Seroconversion [3]/>= 2-fold Increase from Baseline [5] rows as one section;
+proc sort data=ADD_REC1;by &cohortn.  paramcd  avisitn _order1_;run;
+data ADD_REC2;
+set ADD_REC1;
+
+if _order1_ <79 then _section_= avisitn*2;
+if _order1_ >=79 then _section_= avisitn*2+1;
+
+/*reduce section number to display Baseline and Day 29 first half part on the same page*/
+if avisitn=3 then _section_=_section_-4;
+run;
+
+
+proc sort data=ADD_REC2; by &cohortn. newparam avisitn _section_ _order1_ _skipvar_;run;
+
+data checksection;
+set ADD_REC2;
+keep &cohortn. paramcd avisitn _section_ _order1_ _skipvar_ col1;
+run;
+
+proc sort data=ADD_REC2; by &cohortn. newparam avisitn _section_ _order1_ _skipvar_;run;
+
+%mu_get_sort_order(ADD_REC2);
+
+%if %symexist(g_outtype)=0 %then %do;
+%mr_pack
+  (  in_data=ADD_REC2
+   , out_data=MR_PACK
+   , var=col1
+   , packvar_label =
+   , page_width_chars = &_default_page_width_chars.
+   , col1_width_pcnt = %eval(&_default_col1_width_pcnt.+3)
+   , indent=_indent_
+  );
+
+** Get Titles and Footnotes, Count usuable lines per page;
+        %get_tf
+        ( tlf_progname = &g_deliverableid. 
+  		, escapechar = &_default_escapechar.
+	   , fpage=yes
+	   , fpage_ignore_lines=1
+	   , fpage_first_footnote = %str(Note: Footnotes are listed on last page.)
+        ) *;
+
+%mu_lines_per_page 
+ (  in_data = MR_PACK
+  , metadata_filepath = &g_deliverableid._tf
+  , tlf_progname = &g_deliverableid.
+  , globaltfs = 1
+  , headerLines = 
+  , nested_headerLines =   
+  , spanner_lines  =  0 
+  , linesPerPage = &_default_page_length_lines.
+  , escapechar =  &_default_escapechar.
+  , prcode_split  =  &_default_prcode_split.
+  , rtfwidth = &_default_page_width_chars.
+  , subgroup_var = &cohortn.
+ );
+
+%mr_pagebreak_table
+ (  vartx               = pack_col1 
+  , lines_left_on_page  = &g_linesleft.
+  , in_data             = MR_PACK
+  , out_data            = pagebreak
+  , escapechar          = &_default_escapechar.
+  , ORDERBY 			= &cohortn. newparam  _section_ avisitn
+  , subgrp              =  &cohortn. 
+  , section             = _section_
+  , section_protection  = y
+  , lineskip            = 1
+ );
+
+
+%mu_align
+  ( in_data      = pagebreak
+  , out_data     = FINAL
+  , colprefix    = n_pcnt_
+  , align        = C
+  );
+
+
+/*Define COLHEAD_xx macros used in define statement in PROC REPORT;*/
+ data bign_colhead;
+  length colhead $ 200;
+  set bign;
+   colheadn = trim(left(compress(bign_index, '_'))) ;
+  call symput("COLHEAD_"||compress(colheadn), colhead);
+  run;
+
+*final sorting ;
+proc sort data=final;
+by  &cohortn.  newparam  pagenum avisitn _SECTION_ _skipvar_ _order1_ ;
+run;
+%end;
+%mend continuetable;
+%end;
+
+
+*********************************************************************************************************************************************************;
+***PROC REPORT*******************************************************************************************************************************************;
+*********************************************************************************************************************************************************;
+
+*** Proc report macro when there are observation in ADSL**************************************************************************;
+%MACRO REPORT_A;
+proc sql noprint;
+select max(&cohortn.) into: maxcohort from final;
+quit;
+%put &maxcohort.;
+
+%mr_odsout;
+
+	%macro sub_report(subn= );
+
+		title%eval(&title_count+1);
+
+		%IF &cohortc.= SCOV2BL %THEN %DO;
+	 ** For creating subgroup titles **;
+			%mr_subgroup_title(                /* Repeat this call multiple times, if you have more than one subgroup title in your spec */
+			subgroup = &cohortn.
+		   ,subgroup_title = %str(Baseline SARS-CoV-2 Status: )
+		   ,justify = l
+		   ,num_skip_lines = 0
+		   );
+		%END;
+
+		%IF &cohortc.= ELECSBL %THEN %DO;
+	 ** For creating subgroup titles **;
+			%mr_subgroup_title(                /* Repeat this call multiple times, if you have more than one subgroup title in your spec */
+			subgroup = &cohortn.
+		   ,subgroup_title = %str(Baseline Elecsys: )
+		   ,justify = l
+		   ,num_skip_lines = 0
+		   );
+		%END;
+
+	** For creating subgroup titles **;
+			%mr_subgroup_title(                /* Repeat this call multiple times, if you have more than one subgroup title in your spec */
+			subgroup = newparam
+		   ,subgroup_title = %str(Antibody: )
+		   ,justify = l
+		   ,num_skip_lines = 0
+		   );
+
+	proc report data=final missing split="$" nowd STYLE(REPORT)={OUTPUTWIDTH=100%};
+	where &cohortn. = &subn.;
+	by &cohortn. newparam;
+	COLUMNS  pagenum  avisitn _SECTION_ _skipvar_ _order1_  pack_col1  n_pcnt_1 n_pcnt_2 ;
+	define pagenum / order order=internal noprint;
+	define avisitn / order order=internal noprint;
+	define _SECTION_ / order order=internal noprint;
+	define _skipvar_ / order order=internal noprint;
+	define _order1_ / order order=internal noprint;
+
+	define pack_col1 / "Timepoint &_default_escapechar.n  Data Category &_default_escapechar.n    Statistic" style(column)=[cellwidth=26% asis=on] style(header)=[just=l asis=on];
+	%if &subn. =1 %then %do;
+	define n_pcnt_1 / "&COLHEAD_11." style(column)=[cellwidth=25% asis=on vjust=TOP just=L protectspecialchars=off];
+	define n_pcnt_2 / "&COLHEAD_12" style(column)=[cellwidth=25% asis=on vjust=TOP just=L protectspecialchars=off];
+	%end;
+	%if &subn. =2 %then %do;
+	define n_pcnt_1 / "&COLHEAD_21." style(column)=[cellwidth=25% asis=on vjust=TOP just=L protectspecialchars=off];
+	define n_pcnt_2 / "&COLHEAD_22" style(column)=[cellwidth=25% asis=on vjust=TOP just=L protectspecialchars=off];
+	%end;
+	%if &subn. =3 %then %do;
+	define n_pcnt_1 / "&COLHEAD_31." style(column)=[cellwidth=25% asis=on vjust=TOP just=L protectspecialchars=off];
+	define n_pcnt_2 / "&COLHEAD_32" style(column)=[cellwidth=25% asis=on vjust=TOP just=L protectspecialchars=off];
+	%end;
+
+	break after pagenum / page;
+	compute BEFORE _skipvar_ / style=[cellheight=0.5ex];
+	line " ";
+	endcomp;
+	run;
+	%mend sub_report;
+ %sub_report(subn=1 );
+ %sub_report(subn=2 );
+ %if &maxcohort.=3 %then %do; %sub_report(subn=3 );%end;
+
+ ** Get Titles and Footnotes, Count usuable lines per page;
+        %get_tf
+        ( tlf_progname = &g_deliverableid. 
+  		, escapechar = &_default_escapechar.
+	   , fpage=yes
+	   , fpage_ignore_lines=1
+	   , fpage_first_footnote = %str(Note: Footnotes are listed on last page.)
+        ) *;
+
+%mr_odsclose;
+
+%MEND REPORT_A;
+
+
+
+
+
+*********************************************************************************************************************************************************;
+***0 observation in ADSL*******************************************************************************************************************************************;
+*********************************************************************************************************************************************************;
+%if &pop = 0 %then %do;
+
+*dummy FINAL dataset;
+	DATA FINAL;
+			pagenum = .;
+			avisitn = .;
+			_section_ = .;
+			_skipvar_ = .;
+			_order1_ = .;
+			&cohortn. = .;
+		    call missing (n_pcnt_1,n_pcnt_2,pack_col1,newparam) ;
+	run;
+
+*reset BIGN in column header;
+	%let COLHEAD_11 = %str(Placebo$(N=0));
+	%let COLHEAD_12 = %str(mRNA-1273$(N=0));
+	%let COLHEAD_21 = %str(Placebo$(N=0));
+	%let COLHEAD_22 = %str(mRNA-1273$(N=0));
+
+%put &COLHEAD_11. &COLHEAD_12. &COLHEAD_21. &COLHEAD_22. ;
+
+*dummy figure dataset output;
+data f_&g_deliverableid.;
+	&cohortn.= .;
+	avisitn =.;
+	call missing (n_pcnt_1,n_pcnt_2,col1,avisit,paramcd, &cohortc.,newparam) ;
+run;
+
+%end;
+
+
+*** Proc report macro when there is no observation in ADSL**************************************************************************;
+
+%MACRO REPORT_B;
+%mr_odsout;
+
+	proc report data=final missing split="$" nowd STYLE(REPORT)={OUTPUTWIDTH=100%};
+	COLUMNS  pagenum  avisitn _SECTION_ _skipvar_ _order1_  pack_col1  n_pcnt_1 n_pcnt_2 ;
+	define pagenum / order order=internal noprint;
+	define avisitn / order order=internal noprint;
+	define _SECTION_ / order order=internal noprint;
+	define _skipvar_ / order order=internal noprint;
+	define _order1_ / order order=internal noprint;
+
+	define pack_col1 / "Timepoint &_default_escapechar.n  Data Category &_default_escapechar.n    Statistic" style(column)=[cellwidth=25% asis=on] style(header)=[just=l asis=on];
+
+	define n_pcnt_1 / "&COLHEAD_11." style(column)=[cellwidth=25% asis=on vjust=TOP just=L protectspecialchars=off];
+	define n_pcnt_2 / "&COLHEAD_12" style(column)=[cellwidth=25% asis=on vjust=TOP just=L protectspecialchars=off];
+
+			compute before pagenum / style(lines)=[just=c];
+	              line @1 '';
+	              line @1 '';
+	              line @1 "&_DEFAULT_NO_SUBJECTS_TABLE.";
+	           endcomp;
+
+run;
+
+** Get Titles and Footnotes, Count usuable lines per page;
+        %get_tf
+        ( tlf_progname = &g_deliverableid. 
+  		, escapechar = &_default_escapechar.
+	   , fpage=yes
+	   , fpage_ignore_lines=1
+	   , fpage_first_footnote = %str(Note: Footnotes are listed on last page.)
+        ) *;
+
+%mr_odsclose;
+%MEND REPORT_B;
+
+

@@ -1,0 +1,482 @@
+*************************************************************************************************;
+* 
+*           CLIENT:  ModernaTX, Inc.
+*         PROTOCOL:  mRNA-1273-P201
+*
+*          PURPOSE: Create common code for analysis dataset adis
+*      
+*      INPUT FILES: SDTM domains
+*     OUTPUT FILES: work.final.sas7bdat
+*
+*      USAGE NOTES: 
+*      
+*************************************************************************************************;
+*  (c) 2020 PPD
+*  All Rights Reserved. 
+*************************************************************************************************;
+
+**Assign global macro variable DSETNAME to reflect the name of the final ADaM dataset**;
+options noquotelenmax;
+%include "madam.sas";
+%include "_adsl_vars_.sas";
+
+data adsl;	
+	set final;
+run;
+proc sort nodupkey; by  usubjid &adslvar.; run;
+
+%let adslvar=tr01sdt dose2dt tr01sdtm tr01edtm dose1fl dose2fl eosdt dthdt randfl sex elecsbl;
+
+**Merge supplemental data onto parent domain**;
+%revsupp(libin=trans,libout=work,ds=is,supp=suppis,outds=is_all);
+
+proc sort tagsort data=is_all(rename=(uloq=_uloq lloq=_lloq lod=_lod)); 
+	by usubjid iscat istestcd isdtc; 
+	where missing(isstat) and not missing(istestcd);
+run;
+
+**INSERT CODE TO GENERATE DATASET**;
+data is_adsl;
+	merge is_all(in=a) adsl(in=b keep=USUBJID &adslvar.);
+	by usubjid;
+	if a and b;
+run;
+
+proc sort tagsort data=is_adsl; by usubjid isdtc istestcd; run;
+
+data is_adsl;
+	length PARAMCD $8 PARAM $50 PARCAT1 $50;
+	set is_adsl;
+	by usubjid isdtc istestcd;
+
+	array isori(1) $ ismethod;
+
+	PARCAT1 = iscat;
+	ULOQ=input(_uloq,best.);
+	LLOQ=input(_lloq,best.);
+	LOD=input(_lod,best.);
+
+	* paramcd/param;
+	if index(lowcase(parcat1),'neutralizing') then do;
+		PARAMCD = strip(istestcd);
+		PARAM = strip(istest);
+	end;
+	else if index(lowcase(parcat1),'binding') then do;
+		PARAMCD = strip(istestcd);
+		PARAM = strip(istest)||' ('||strip(isstresu)||')';
+	end;
+	if isnam in ('PPD VACCINE' 'VRC') then do;
+        param = strip(strip(param) ||' by '|| strip (ISMETHOD));
+    end;
+
+	* results AVAL;
+	if index(isstresc,'<') or 
+	   (nmiss(LOD,ISSTRESN) = 0 and ISSTRESN < LOD) or
+	   (nmiss(ISLLOQ,ISSTRESN) = 0 and ISSTRESN < ISLLOQ) 
+	   then do;
+		DTYPE = 'HALFLLOQ';  		
+		if ISLLOQ ne . then AVAL = ISLLOQ*0.5;
+	end;
+	else if index(isstresc,'>')  or 
+	   (nmiss(ULOQ,ISSTRESN) = 0 and ISSTRESN > ULOQ) then do;
+		DTYPE = 'ULOQ';
+		AVAL = ULOQ; 
+	end;
+	else AVAL = isstresn;
+
+	  	  If paramcd  in ('V65IGGS','V66IGGN') then do ;
+          if index(isstresc,'<') or 
+	   (nmiss(LOD,ISSTRESN) = 0 and ISSTRESN < LOD) or
+	   (nmiss(ISLLOQ,ISSTRESN) = 0 and ISSTRESN < ISLLOQ)  
+	   or  index(isstresc,'BQL') and  ISLLOQ ne . then AVAL = ISLLOQ*0.5;
+	end;
+
+	  if paramcd in ('V65IGGS','V66IGGN')  and index(isstresc,'>')   then do;
+		AVAL = ULOQ; 
+	end;
+
+
+
+
+
+
+	* _avaln;
+		if ^missing(isstresc) then _avaln = 1; else _avaln = 0;
+
+	* Analysis Date/time;
+	%ISO2SAS(isodate=ISDTC, datec=_isdtc, daten=ADT, timec=_atmc);
+	if ^missing(_atmc) then ATM = input(_atmc,time5.);
+	if ^missing(_atmc) and ^missing(ADT) then ADTM = input(compress(put(ADT,date9.)||':'||_atmc),datetime20.);
+
+		if ADT>=TR01SDT>. then ADY = ADT - TR01SDT + 1;
+		else if .<ADT<TR01SDT then ADY = ADT - TR01SDT;
+
+	* _adtm;
+		if cmiss(ADTM,TR01SDTM)=0 then _adtmy = ADTM - TR01SDTM;
+		else if cmiss(ADT,TR01SDT)=0 then _adtmy = input(compress(put(ADT,date9.)||':00:00'),datetime20.) - input(compress(put(TR01SDT,date9.)||':23:59'),datetime20.);
+		else _adtmy = 99999999;
+
+		if _adtmy<=0 and ^missing(TR01SDT) then prefl='Y'; 	
+		else if ady=1 and ^missing(TR01SDT) and TR01SDT = ADT then prefl='Y'; 
+		else if _adtmy>0 and ^missing(TR01SDT) and ~missing(ADT) then postfl='Y';
+
+		_adtmy = abs(_adtmy);
+
+	format ADTM datetime20. ADT date9. ATM time5.;
+run;
+
+
+%macro newparamcd(cd=,ram=,l10=,whr=);
+data new_&cd;
+length PARAMCD $8.;
+	set is_adsl(where=(paramcd="&cd." &whr. and AVAL not in (.)));
+
+	if AVAL not in (. 0) then AVAL = log10(AVAL);
+	
+	PARAMTYP = 'DERIVED';
+
+	call missing(ISSTRESC,ISLLOQ);
+	ULOQ=input(_uloq,best.);
+	LLOQ=input(_lloq,best.); ISLLOQ=LLOQ;
+	LOD=input(_lod,best.);
+
+	PARAMCD = compress("&l10.");
+	PARAM = strip("&ram.");
+run;
+%mend newparamcd;
+%newparamcd(l10=L10MN50   , cd=MN50,ram=%nrstr(LOG10(MN50)) );
+%newparamcd(l10=L10MNET   , cd=MNET,ram=%nrstr(LOG10(MN Endpoint Titer)) );
+%newparamcd(l10=L10PVN50, cd=PSVNT50,ram=%nrstr(LOG10(PsVNT50)) ); 
+
+%newparamcd(l10=LV58IGGS,cd=V58IGGES,ram=%nrstr(LOG10(VAC58 Spike IgG Antibody)), whr=%str(and aval not in ( .)));
+%newparamcd(l10=LV58IGGN,cd=V58IGGEN,ram=%nrstr(LOG10(VAC58 Nucleocapsid IgG Antibody)), whr=%str(and aval not in ( 0 .)));
+%newparamcd(l10=LV58IGMS,cd=V58IGMES,ram=%nrstr(LOG10(VAC58 Spike IgM Antibody)), whr=%str(and aval not in ( .)));
+%newparamcd(l10=LV58IG1S,cd=V58IG1ES,ram=%nrstr(LOG10(VAC58 Spike IgG subclass 1)),whr=%str(and aval not in ( .)));
+%newparamcd(l10=LV58IG2S,cd=V58IG2ES,ram=%nrstr(LOG10(VAC58 Spike IgG subclass 2)),whr=%str(and aval not in ( .)));
+%newparamcd(l10=LV58IG3S,cd=V58IG3ES,ram=%nrstr(LOG10(VAC58 Spike IgG subclass 3)),whr=%str(and aval not in ( .)));
+%newparamcd(l10=LV58IG4S,cd=V58IG4ES,ram=%nrstr(LOG10(VAC58 Spike IgG subclass 4)),whr=%str(and aval not in ( .)));
+
+%newparamcd(l10=LV65IGGS,cd=V65IGGS,ram=%nrstr(LOG10(VAC65 Spike IgG Antibody)),whr=%str(and aval not in ( .)));
+%newparamcd(l10=LV66IGGN,cd=V66IGGN,ram=%nrstr(LOG10(VAC66 Nucleocapsid IgG Antibody)),whr=%str(and aval not in (0 .)));
+
+
+data newparamcd;
+	set is_adsl new_:;
+run;
+
+proc sort tagsort data=newparamcd out=base_chg; 
+	by usubjid paramcd descending _avaln postfl descending ady descending _adtmy descending isseq; 
+run;
+
+data base_chg;
+	length AVISIT $50 AWRANGE $20 _war $200;
+	set base_chg;
+	by usubjid paramcd descending _avaln postfl descending ady descending _adtmy descending isseq;
+
+	* Baseline Record Flag;
+	retain BASE baselloq basec baselod;
+	if first.paramcd and _avaln=1 and prefl='Y' then do;
+		ABLFL = 'Y';
+		AVISIT = 'Baseline';
+		BASE = AVAL;
+		BASEC = ISSTRESC;
+		baselloq=islloq;
+		baselod=lod;
+	end;
+	else if first.paramcd then do;
+		BASE = .; BASEC='';
+	end;
+
+	* Change from Baseline;
+	if postfl='Y' and cmiss(AVAL,BASE)=0 then CHG = AVAL - BASE;
+	if postfl='Y' and base ne 0 and cmiss(AVAL,BASE)=0 then R2BASE = AVAL/BASE;
+
+       if DTYPE^='DERIVED' and PARAMCD IN ('MNET','MN50') Then do;
+			if R2BASE>=2  and postfl = 'Y' then CRIT1FL = 'Y';
+			if CRIT1FL='Y' then CRIT1 = '>=2-fold Increase from Baseline';
+/*			 where usubjid ='mRNA-1273-P201-US201-1069' and paramcd IN ('MNET','MN50');*/
+end;      
+
+       if DTYPE^='DERIVED' and PARAMCD IN ('V65IGGS','V66IGGN') Then do;
+	     if cmiss(base,aval)=0 and base<islloq and aval >=2*islloq then CRIT1FL ="Y";
+		 if CRIT1FL='Y' then CRIT1 = '>=2-fold Increase from Baseline';		
+end;
+
+       if DTYPE^='DERIVED' and PARAMCD IN ('V65IGGS','V66IGGN') Then do;
+			if BASE >= ISLLOQ and R2BASE>=2  and postfl = 'Y' then CRIT1FL = 'Y';
+		 if CRIT1FL='Y' then CRIT1 = '>=2-fold Increase from Baseline';		
+end;
+/*		 where usubjid ='mRNA-1273-P201-US201-1069' and paramcd IN ('V65IGGS');*/
+/*		 			 where usubjid ='mRNA-1273-P201-US201-1069' and paramcd IN ('MNET','MN50' ,'V65IGGS');*/
+/*   WHERE   PARAMCD IN ('MNET','MN50,''V65IGGS','V66IGGN');*/
+
+
+	* Criterion 2 Evaluation Result Flag;
+           if paramcd in ('MNET', 'MN50' /*'V65IGGS', 'V66IGGN'*/) then do ;
+
+			if R2BASE>=3  and postfl = 'Y'  then CRIT2FL = 'Y';
+			if CRIT2FL='Y' then CRIT2 = '>=3-fold Increase from Baseline';
+		end;
+/*		keep subjid usubjid paramcd param r2base postfl crit2fl crit2;*/
+/**/
+/*		 where usubjid ='mRNA-1273-P201-US201-1126' and paramcd IN ('V66IGGN');*/
+
+
+       if DTYPE^='DERIVED' and PARAMCD IN ('V65IGGS','V66IGGN') Then do;
+	     if cmiss(base,aval)=0 and base<islloq and aval >=3*(islloq) then CRIT2FL ="Y";
+			if CRIT2FL='Y' then CRIT2 = '>=3-fold Increase from Baseline';
+end;
+
+
+       if DTYPE^='DERIVED' and PARAMCD IN ('V65IGGS','V66IGGN') Then do;
+			if BASE >= ISLLOQ and R2BASE>=3  and postfl = 'Y' then CRIT2FL = 'Y';
+			if CRIT2FL='Y' then CRIT2 = '>=3-fold Increase from Baseline';
+end;
+
+
+
+
+		* Criterion 3 Evaluation Result Flag;
+           if paramcd in ('MNET', 'MN50' /*'V65IGGS', 'V66IGGN'*/) then do ;
+
+			if R2BASE>=4  and postfl = 'Y'  then CRIT3FL = 'Y';
+			if CRIT3FL='Y' then CRIT3 = '>=4-fold Increase from Baseline';
+		end;
+
+		if DTYPE^='DERIVED' and PARAMCD IN ('V65IGGS','V66IGGN') Then do;
+	     if cmiss(base,aval)=0 and base<islloq and aval >=4*(islloq) then CRIT3FL ="Y";
+			if CRIT3FL='Y' then CRIT3 = '>=4-fold Increase from Baseline';
+end;
+
+ if DTYPE^='DERIVED' and PARAMCD IN ('V65IGGS','V66IGGN') Then do;
+			if BASE >= ISLLOQ and R2BASE>=4  and postfl = 'Y' then CRIT3FL = 'Y';
+			if CRIT3FL='Y' then CRIT3 = '>=4-fold Increase from Baseline';
+end;
+
+
+	* Criterion 4 Evaluation Result Flag;
+
+	if DTYPE^='DERIVED' and PARAMCD IN ( 'MNET','MN50','V65IGGS') Then do;
+	     if cmiss(base,aval)=0 and base<islloq and aval >=islloq then CRIT4FL ="Y";
+			if CRIT4FL='Y' then CRIT4 = 'Seroconversion';
+end;
+
+if DTYPE^='DERIVED' and PARAMCD IN ( 'MNET','MN50','V65IGGS') Then do;
+			if BASE >= ISLLOQ and R2BASE>=4  and postfl = 'Y' then CRIT4FL = 'Y';
+			if CRIT4FL='Y' then CRIT4 = 'Seroconversion';
+end;
+
+/**criterian 5**/
+
+	
+	if DTYPE^='DERIVED' and PARAMCD IN ( 'V65IGGS') Then do;
+	     if cmiss(base,aval)=0 and base<islloq and aval >=islloq then CRIT5FL ="Y";
+			if CRIT5FL='Y' then CRIT5 = 'Seroresponse';
+end;
+
+if DTYPE^='DERIVED' and PARAMCD IN ( 'V65IGGS') Then do;
+			if BASE >= ISLLOQ and R2BASE>=4.6  and postfl = 'Y' then CRIT5FL = 'Y';
+			if CRIT5FL='Y' then CRIT5 = 'Seroresponse';
+end;
+
+
+   if DTYPE^='DERIVED' and  PARAMCD in ('V66IGGN','SARSCOV2')   then do; 
+    	if BASE not in (. 0) and postfl = 'Y' then do;
+	      if upcase(elecsbl) ='NEGATIVE' and upcase(paramcd) = 'SARSCOV2' and upcase(ISSTRESC) ='POSITIVE' then
+	      CRIT6FL ='Y';
+	      else if upcase(elecsbl) = 'POSITIVE' and upcase(paramcd) = 'V66IGGN' and r2base>=4 then
+	      CRIT6FL ='Y';
+		  if CRIT6FL='Y' then CRIT6 = 'Seroconversion due to Infection';
+	      end;
+  end;
+
+  
+   if missing(isdtc) then  do;
+    CRIT1FL ='';
+	CRIT1 ='';
+
+	CRIT2FL ='';
+	CRIT2 ='';
+
+	CRIT3FL ='';
+	CRIT3 ='';
+
+	CRIT4FL ='';
+	CRIT4 ='';
+
+	CRIT5FL ='';
+	CRIT5 ='';
+
+	CRIT6FL ='';
+	CRIT6 ='';
+  end;
+
+
+	* Analysis Visit;
+	/*if postfl='Y' and .<ady<=1 then do;
+		_war='Put Aler'||'t_R: AVISIT needs spec udpate becuase postfl=Y and .<ady<=1.';
+		put _war usubjid= paramcd= ABLFL= isDTC= TR01SDTM= TR01SDT= prefl= postfl= isSTRESC=;
+	end;*/
+
+	if postfl='Y' and (index(visit,'Uns') or missing(visit)) then do;
+		if 1<ADY<=22 then AVISIT = 'Day 15';
+		else if 22<ADY<=36 then AVISIT = 'Day 29';
+		else if 36<ADY<=50 then AVISIT = 'Day 43';
+		else if 50<ADY<=133 then AVISIT = 'Day 57';
+		else if 133<ADY<=301 then AVISIT = 'Day 209';
+		else if 301<ADY then AVISIT = 'Day 394';
+
+		if missing(visit) and ^missing(avisit) then do;
+		_war='Put Aler'||'t_R: Subject '|| strip(USUBJID) ||' Non-missing AVISIT='||strip(avisit)||' on '||strip(isdtc)||' while VISIT is missing.';
+		put _war;
+		end;
+	end;
+	else if postfl='Y' and ady>1 then AVISIT = 'Day'||scan(visit,2,'Day');
+
+	*Analysis Visit (N);
+	if AVISIT='Baseline' then AVISITN = 1;
+	else if AVISIT='Day 15' then AVISITN = 4;
+	else if AVISIT='Day 29' then AVISITN = 5;
+	else if AVISIT='Day 43' then AVISITN = 7;
+	else if AVISIT='Day 57' then AVISITN = 8;
+	else if AVISIT='Day 209' then AVISITN = 9;
+	else if AVISIT='Day 394' then AVISITN = 10;
+	else if ^missing(AVISIT) then do;
+		_war='Put Aler'||'t_R: AVISIT='||strip(avisit)||' while AVISITN is missing.';
+		put _war;
+	end;
+
+	* Analysis Window Valid Relative Range;
+	if AVISIT='Baseline' then AWRANGE = '<=1 Pre-dose';
+	else if AVISIT='Day 15' then AWRANGE = 'Day 2 - Day 22';
+	else if AVISIT='Day 29' then AWRANGE = 'Day 23 - Day 36';
+	else if AVISIT='Day 43' then AWRANGE = 'Day 37 - Day 50';
+	else if AVISIT='Day 57' then AWRANGE = 'Day 51 - Day 133';
+	else if AVISIT='Day 209' then AWRANGE = 'Day 134 - Day 301';
+	else if AVISIT='Day 394' then AWRANGE = '>= Day 302';
+
+	* Analysis Window Target;
+	if AVISIT='Baseline' then AWTARGET = 1;
+	else if AVISIT='Day 15' then AWTARGET = 15;
+	else if AVISIT='Day 29' then AWTARGET = 29;
+	else if AVISIT='Day 43' then AWTARGET = 43;
+	else if AVISIT='Day 57' then AWTARGET = 57;
+	else if AVISIT='Day 209' then AWTARGET = 209;
+	else if AVISIT='Day 394' then AWTARGET = 394;
+
+		* Analysis Window Diff from Target;
+		if cmiss(AWTARGET,ADY)=0 then AWTDIFF = abs(ADY - AWTARGET);
+		if cmiss(AWTARGET,ADY)=0 then AWU = 'DAYS';
+
+
+		if postfl='Y' and (index(visit,'Uns') or missing(visit)) then do;
+			_uns=1;
+			_awtdiff=awtdiff;
+		end;
+		else if postfl='Y' then do;
+			_uns=0;
+			_awtdiff=0;
+		end;
+		else _awtdiff=99999999;
+run;
+
+
+
+* Analysis Flag 01;
+proc sort tagsort data=base_chg  ; 
+	by usubjid paramcd avisitn descending postfl descending _avaln _uns _awtdiff descending _adtmy;
+run;
+
+data anl01fl_nmiss;
+	set base_chg;
+	if aval ne .;
+run;
+proc sort; 
+	by usubjid paramcd avisitn descending postfl descending _avaln _uns _awtdiff descending _adtmy;
+run;
+
+data anl01fl_nmiss;
+	set anl01fl_nmiss;
+	by usubjid paramcd avisitn descending postfl descending _avaln _uns _awtdiff descending _adtmy;
+
+	if first.avisitn and ^missing(avisitn) and postfl='Y' and _avaln=1 then ANL01FL = 'Y';
+	if ABLFL='Y' then ANL01FL='Y'; 
+run;
+ 
+data anl01fl_miss;
+	set base_chg;
+	if aval = .;
+run;
+ 
+ data prefinal;
+ 	set anl01fl_nmiss anl01fl_miss;
+ run;
+ proc sort; 
+	by usubjid  ;
+run;
+
+* Analysis Flag 02;
+proc sort tagsort data=prefinal  ; 
+	by usubjid paramcd avisitn descending postfl descending _avaln _uns _awtdiff descending _adtmy;
+run;
+
+data MN50NETFlag MN50NETnonflag nonM50NET;
+	set prefinal;
+	
+	if paramcd in ('L10MN50' 'MN50') then do;
+		If   (ISLLOQ = 91.1 and ULOQ = 2031.87) then output MN50NETFlag;
+		else  output MN50NETnonflag;
+	end;
+	else if paramcd in ('L10MNET' 'MNET') then do;	
+		If   (ISLLOQ = 40 and ULOQ = 1280 ) then output MN50NETFlag;
+		else  output MN50NETnonflag;
+	end;
+	else output nonM50NET;
+	
+run;
+
+data anl02fl_nmiss;
+	set MN50NETFlag nonM50NET;
+	if aval ne .; 
+run;
+proc sort; 
+	by usubjid paramcd  avisitn descending postfl  descending _avaln _uns _awtdiff descending _adtmy ;
+run;
+
+data anl02fl_nmiss;
+	set anl02fl_nmiss;
+	by usubjid paramcd avisitn descending postfl  descending _avaln _uns _awtdiff descending _adtmy;
+
+	if first.avisitn and ^missing(avisitn) and postfl='Y' and _avaln=1 then anl02fl = 'Y';
+	if ABLFL='Y' then anl02fl='Y'; 
+run;
+ 
+data anl02fl_miss;
+	set MN50NETFlag nonM50NET;
+	if aval = .;
+run;
+ 
+ data final;
+ 	set anl02fl_nmiss anl02fl_miss MN50NETnonflag;
+ run;
+ proc sort; 
+	by usubjid  ;
+run;
+
+
+ data final;
+ 	merge final (in=a) adsl (in=b keep = usubjid);
+ 	by usubjid;
+ 	if a and b;
+ run;
+ 
+
+
+
+
+
+
+
+
+
+

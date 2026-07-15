@@ -1,0 +1,152 @@
+*************************************************************************************************;
+*           CLIENT: ModernaTX, Inc.
+*         PROTOCOL: mRNA-1273-P301
+*          PURPOSE: Create RTF template      
+*      INPUT FILES: None
+*     OUTPUT FILES: None
+*      USAGE NOTES: 
+*      
+*************************************************************************************************;
+*  Copyright 2020 Pharmaceutical Product Development, Inc.
+*  All Rights Reserved.
+*************************************************************************************************;
+
+%macro mu_rtf_template
+( papersize='LETTER'
+, orientation=landscape
+, font=Courier New
+, fontsize=9
+, leftmargin='1in'
+, rightmargin='1in'
+, topmargin='1in'
+, bottommargin='1in'
+, style=STYLES.POSTTEXT
+, page_length_lines = 
+, page_width_chars =
+) / SECURE des="v1.0.0.0";
+
+%** Set length and width as they are defined by the template itself;
+%global _default_page_length_lines _default_page_width_chars;
+%if &page_length_lines ne %str() %then %do;
+  %let _default_page_length_lines = &page_length_lines;
+%end;
+%if &page_width_chars ne %str() %then %do;
+  %let _default_page_width_chars = &page_width_chars;
+%end;
+/*ods path(prepend) work.templat(update);*/
+ODS PATH work.templat(update) sasuser.templat(read) sashelp.tmplmst(read); 
+%** Set options;
+options 
+papersize = &papersize 
+orientation = &orientation 
+topmargin = &topmargin 
+bottommargin = &bottommargin 
+leftmargin = &leftmargin 
+rightmargin = &rightmargin 
+nodate nonumber missing=' ';
+
+%** Create template for TLFs **;
+proc template;
+   
+
+   define style &style ;
+        parent=styles.rtf;
+        replace fonts /
+          'TitleFont2' = ("&font",&fontsize.pt )         
+          'TitleFont' = ("&font",&fontsize.pt )          
+          'FootnoteFont' = ("&font",&fontsize.pt )       
+          'StrongFont' = ("&font",&fontsize.pt )         
+          'EmphasisFont' = ("&font",&fontsize.pt )
+          'FixedEmphasisFont' = ("&font",&fontsize.pt )
+          'FixedStrongFont' = ("&font",&fontsize.pt)
+          'FixedHeadingFont' = ("&font",&fontsize.pt)
+          'BatchFixedFont' = ("&font",&fontsize.pt )
+          'FixedFont' = ("&font",&fontsize.pt )
+          'headingEmphasisFont' = ("&font",&fontsize.pt )
+          'headingFont' = ("&font",&fontsize.pt )        
+          'docFont' = ("&font",&fontsize.pt );
+	replace document from container	/	
+          asis = on
+          protectspecialchars=off;
+        replace SystemFooter from TitlesAndFooters /
+          asis = on
+          protectspecialchars = on
+          font= Fonts('FootnoteFont');         
+	replace systemtitle from titlesandfooters / 
+	  asis = on 
+	  protectspecialchars=off;   
+	replace body from document / 
+	  asis = on; 
+        replace color_list "Colors used in the default style" /
+          'link'= blue
+          'bgH'= white
+          'fg' = black
+          'bg' = white;         
+        replace Table from output /
+          Background=_UNDEF_                                                
+          cellpadding = 0pt   
+          Rules=groups
+          Frame=above;
+        style Header from Header /
+          Background=_undef_;
+        style Rowheader from Rowheader /
+          Background=_undef_;
+        replace pageno from titlesandfooters/
+          Foreground=white;
+   end;
+
+run;
+ 
+%mend mu_rtf_template;
+
+
+
+*======== Template for Figures ===============* ;
+
+%macro templates_f ;
+options orientation=landscape ;
+
+proc template;
+	define style tlout_grph ;
+	parent=styles.rtf;
+	replace fonts /
+       'titlefont2'=("Courier New, Courier",9pt)
+       'titlefont'=("Courier New, Courier",9pt)
+       'Strongfont'=("Courier New, Courier",9pt)
+       'EmphasisFont'=("Courier New, Courier",9pt)
+       'FixedEmphasisFont'=("Courier New, Courier",2)
+       'FixedStrongFont'=("Courier New, Courier",2)
+       'FixedHeadingFont'=("Courier New, Courier",2)
+       'BatchFixedFont'=("SAS Monospace,Courier New, Courier",2)
+       'FixedFont'=("Courier New, Courier",2)
+       'headingEmphasisFont'=("Courier New, Courier",10pt)
+       'headingFont'=("Courier New, Courier",9pt)
+       'docFont'=("Courier New, Courier",9pt)
+	   'footFont'=("Courier New, Courier",9pt) ;
+
+	style table from table /rules=groups
+                             frame=above 
+			     frameborder=on 
+			     frameborderwidth=0.25
+			     font_weight=light
+                             cellspacing=0
+                             cellpadding=0 ;
+
+    style systemtitle from systemtitle / asis=on;
+    style systemfooter from systemfooter / asis=on;
+    replace headersAndFooters from cell/
+    	font=fonts('HeadingFont')
+    	foreground=black
+    	background=white;
+        	replace Body from Document
+        	"Controls the Body file. " /
+            bottommargin = 1.01 in   /* 1.01 from footnote to edge */
+            topmargin    = 1.18 in   /* 1.18 from 1st header title to edge */
+            rightmargin  = 0.79 in
+            leftmargin   = 0.81 in; 
+		end;
+run;
+
+%mend templates_f ;
+
+

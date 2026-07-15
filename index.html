@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FDA-FOIA-2026-6007 · Document Navigator</title>
+<style>
+  :root{ --blue:#1e4d8c; --blue2:#2f6bbf; --red:#b3261e; --green:#137333; --bg:#f6f8fb; --line:#e2e8f0; --ink:#1a2233; --muted:#5b6676; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; color:var(--ink); background:var(--bg); }
+  header{ background:var(--blue); color:#fff; padding:20px 24px; }
+  header h1{ margin:0 0 4px; font-size:20px; }
+  header p{ margin:0; opacity:.9; font-size:13px; }
+  .wrap{ max-width:1280px; margin:0 auto; padding:18px 24px 60px; }
+  .stats{ display:flex; gap:14px; flex-wrap:wrap; margin:16px 0; }
+  .stat{ background:#fff; border:1px solid var(--line); border-radius:10px; padding:10px 16px; min-width:120px; }
+  .stat b{ display:block; font-size:22px; color:var(--blue); }
+  .stat span{ font-size:12px; color:var(--muted); }
+  .controls{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
+  .controls input[type=search], .controls select{ padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:13px; background:#fff; }
+  .controls input[type=search]{ flex:1; min-width:240px; }
+  .controls label{ font-size:13px; color:var(--muted); display:flex; gap:6px; align-items:center; }
+  table{ width:100%; border-collapse:collapse; background:#fff; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  th,td{ text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th{ background:#eef2f8; font-size:12px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); position:sticky; top:0; cursor:pointer; }
+  td.fn{ font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; word-break:break-all; max-width:520px; }
+  .badge{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; }
+  .b-new{ background:#fde7e6; color:var(--red); }
+  .b-phmpt{ background:#e6f0e9; color:var(--green); }
+  .cat{ font-size:12px; color:var(--muted); white-space:nowrap; }
+  .links a{ display:inline-block; margin-right:6px; padding:3px 8px; border-radius:6px; font-size:11px; text-decoration:none; border:1px solid var(--line); color:var(--blue2); white-space:nowrap; }
+  .links a.doc{ background:var(--blue2); color:#fff; border-color:var(--blue2); }
+  .links a.drive{ background:#fff8e1; border-color:#f0d67a; color:#7a5b00; }
+  .links a:hover{ filter:brightness(.95); }
+  .pager{ display:flex; gap:8px; align-items:center; justify-content:center; margin:16px 0; }
+  .pager button{ padding:7px 12px; border:1px solid var(--line); background:#fff; border-radius:8px; cursor:pointer; }
+  .pager button:disabled{ opacity:.4; cursor:default; }
+  .muted{ color:var(--muted); font-size:12px; }
+  .note{ background:#fff; border:1px solid var(--line); border-left:4px solid var(--blue2); border-radius:8px; padding:12px 14px; margin:14px 0; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>FDA-FOIA-2026-6007 — Document Navigator</h1>
+  <p>Bioresearch Monitoring (BIMO) release · Pfizer &amp; Moderna COVID-19 vaccines · CBER Partial Response 1.</p>
+</header>
+<div class="wrap">
+  <div class="stats" id="stats"></div>
+
+  <div class="note">
+    Each row links to the document. <b>New</b> documents (not in the PHMPT corpus) link to the MuckRock
+    bundle ZIP that contains them. <b>PHMPT</b> documents link to their individual phmpt.org file, with the
+    source ZIP as backup. Where available, the <b>Drive</b> link opens the file on the
+    <a href="https://coviddocuments.com" target="_blank" rel="noopener">coviddocuments.com</a> Google-Drive navigators
+    (Pfizer BLA / Pfizer EUA / Moderna BLA).
+  </div>
+
+  <div class="controls">
+    <input type="search" id="q" placeholder="Search filename…">
+    <select id="cat"></select>
+    <select id="status">
+      <option value="">All statuses</option>
+      <option value="NEW">New only</option>
+      <option value="PHMPT">PHMPT only</option>
+    </select>
+    <label><input type="checkbox" id="gdonly"> Has Google Drive</label>
+    <span class="muted" id="count"></span>
+  </div>
+
+  <table>
+    <thead><tr>
+      <th data-k="filename">Filename</th>
+      <th data-k="category">Category</th>
+      <th data-k="module">Mod</th>
+      <th data-k="size_mb">MB</th>
+      <th data-k="status">Status</th>
+      <th>Links</th>
+    </tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <div class="pager">
+    <button id="prev">‹ Prev</button>
+    <span class="muted" id="pageinfo"></span>
+    <button id="next">Next ›</button>
+  </div>
+</div>
+
+<script>
+const PAGE = 100;
+let DATA = [], view = [], page = 0, sortKey = "filename", sortDir = 1;
+
+fetch("documents.json").then(r => r.json()).then(d => {
+  DATA = d;
+  buildStats();
+  buildCatFilter();
+  apply();
+});
+
+function buildStats(){
+  const n = DATA.length;
+  const nw = DATA.filter(r => r.status==="NEW").length;
+  const gd = DATA.filter(r => r.gdrive).length;
+  document.getElementById("stats").innerHTML = [
+    ["Documents", n], ["PHMPT (existing)", n-nw], ["New in release", nw], ["With Google Drive", gd]
+  ].map(([l,v]) => `<div class="stat"><b>${v.toLocaleString()}</b><span>${l}</span></div>`).join("");
+}
+function buildCatFilter(){
+  const cats = [...new Set(DATA.map(r => r.category))].sort();
+  document.getElementById("cat").innerHTML =
+    `<option value="">All categories</option>` + cats.map(c => `<option>${c}</option>`).join("");
+}
+function apply(){
+  const q = document.getElementById("q").value.toLowerCase().trim();
+  const cat = document.getElementById("cat").value;
+  const st = document.getElementById("status").value;
+  const gdonly = document.getElementById("gdonly").checked;
+  view = DATA.filter(r =>
+    (!q || r.filename.toLowerCase().includes(q)) &&
+    (!cat || r.category===cat) &&
+    (!st || r.status===st) &&
+    (!gdonly || r.gdrive));
+  view.sort((a,b)=>{
+    let x=a[sortKey], y=b[sortKey];
+    if(typeof x==="string"){x=x.toLowerCase(); y=y.toLowerCase();}
+    return (x<y?-1:x>y?1:0)*sortDir;
+  });
+  page = 0;
+  render();
+}
+function render(){
+  const start = page*PAGE, slice = view.slice(start, start+PAGE);
+  document.getElementById("rows").innerHTML = slice.map(r => {
+    const badge = r.status==="NEW"
+      ? `<span class="badge b-new">NEW</span>`
+      : `<span class="badge b-phmpt">PHMPT</span>`;
+    const docLabel = r.status==="NEW" ? "New (in ZIP)" : "Document";
+    let links = `<a class="doc" href="${r.doc_link}" target="_blank" rel="noopener">${docLabel}</a>`;
+    if (r.zip_link && r.zip_link !== r.doc_link)
+      links += `<a href="${r.zip_link}" target="_blank" rel="noopener">ZIP</a>`;
+    if (r.gdrive)
+      links += `<a class="drive" href="${r.gdrive}" target="_blank" rel="noopener" title="${r.gdrive_nav}">Drive</a>`;
+    return `<tr>
+      <td class="fn">${r.filename}</td>
+      <td class="cat">${r.category}</td>
+      <td class="cat">${r.module||""}</td>
+      <td class="cat">${r.size_mb}</td>
+      <td>${badge}</td>
+      <td class="links">${links}</td></tr>`;
+  }).join("");
+  const total = view.length, pages = Math.max(1, Math.ceil(total/PAGE));
+  document.getElementById("count").textContent = `${total.toLocaleString()} documents`;
+  document.getElementById("pageinfo").textContent = `Page ${page+1} of ${pages}`;
+  document.getElementById("prev").disabled = page<=0;
+  document.getElementById("next").disabled = page>=pages-1;
+}
+document.getElementById("q").addEventListener("input", apply);
+document.getElementById("cat").addEventListener("change", apply);
+document.getElementById("status").addEventListener("change", apply);
+document.getElementById("gdonly").addEventListener("change", apply);
+document.getElementById("prev").addEventListener("click", ()=>{ if(page>0){page--; render();} });
+document.getElementById("next").addEventListener("click", ()=>{ page++; render(); });
+document.querySelectorAll("th[data-k]").forEach(th=>th.addEventListener("click", ()=>{
+  const k=th.dataset.k; sortDir = (sortKey===k? -sortDir : 1); sortKey=k; apply();
+}));
+</script>
+</body>
+</html>

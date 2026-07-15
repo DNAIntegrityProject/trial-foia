@@ -1,0 +1,22 @@
+************************************************************************
+*        CLIENT:  ModernaTX, Inc.
+*      PROTOCOL:  mRNA-1273-P201
+*       PURPOSE:  Create Table 14.2.2.1.1.2 - 
+*				  Summary of Neuralizing Antibody Titers
+*				  Per-Protocol Set for SARS-CoV-2-specific nAb All Lots
+*   INPUT FILES:   ADSL, ADIS
+*  OUTPUT FILES:   t140202010102.rtf  
+*   USAGE NOTES:  
+************************************************************************* 
+*  Copyright 2020 PPD
+*  All Rights Reserved. 
+*************************************************************************;
+
+*** Customize for this table ***;
+
+	 	* Subsetting where clause;
+		%let _default_in_data = adis;
+        %let where = %str(PPNAB2FL="Y" and PARCAT1="Serum SARS-CoV-2 Neutralizing Antibodies" and PPNA2RFL="Y" and ANL01FL="Y"); 
+		%let bign_where = PPNAB2FL="Y";
+
+%include "tmimmsummneut.sas";

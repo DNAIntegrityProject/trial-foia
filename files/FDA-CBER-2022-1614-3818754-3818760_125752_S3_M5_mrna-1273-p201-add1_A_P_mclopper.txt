@@ -1,0 +1,327 @@
+***************************************************************************************************
+*   CLIENT NAME:  ModernaTX, Inc.
+*   PROTOCOL:  mRNA-1273-P201
+*   PURPOSE:  Create Inferential Statistical Analysis Macro
+*
+*   INPUT FILES:  ADB.*
+*   OUTPUT FILES: 
+*   USAGE NOTES:   
+************************************************************************* 
+*  Copyright 2020 PPD
+*  All Rights Reserved. 
+*************************************************************************;
+
+
+%macro clopper (datain=, vac=, sar=,sec=, subset=, crit=, dataout=);
+
+%if &datain. ^=ADIS %then %do;
+
+%if &datain.=ADARSUM %then %do;
+  data &datain.;
+  set adb.&datain.;
+  where &sar.='Y' and ATPTREF in &vac. and PARAMCD not in ('WRASH', 'LYMOCCYN');
+  run;
+  
+  data temp;
+  set &datain.;
+  length trt $20;
+  trt=trt01a;
+  output;
+  if index(trt01a, 'mRNA-1273') then trt='mRNA-1273 Total';
+  output;
+  run;
+
+  data temp1;
+  set temp;
+  length cohort $20;
+  cohort=AGEGR1;
+  output;
+  if AGEGR1^='' then cohort='Overall';;
+  output;
+  run;
+
+  %if &sec.='AR' %then %do;
+    proc sort data=temp1 out=n1 nodupkey;
+    by subjid trt cohort;
+    where (paramcd^='RASHOCYN' and ATOXGRN^=.) or (paramcd='RASHOCYN' and AVALC^='');
+    run;
+
+    proc sort data=temp1 out=any nodupkey;
+    by subjid trt cohort;
+    where (paramcd^='RASHOCYN' and ATOXGRN>0) or (paramcd='RASHOCYN' and AVALC='Y');
+    run;
+  %end;
+
+ %if &sec.='LAR' %then %do;
+    proc sort data=temp1 out=n1 nodupkey;
+    by subjid trt cohort;
+    where parcat1='LOCAL' and ATOXGRN^=.;
+    run;
+
+    proc sort data=temp1 out=any nodupkey;
+    by subjid trt cohort;
+    where parcat1='LOCAL' and ATOXGRN>0;
+    run;
+  %end;
+
+  %if &sec.='SAR' %then %do;
+    proc sort data=temp1 out=n1 nodupkey;
+    by subjid trt cohort;
+    where (parcat1='SYSTEMIC' and ATOXGRN^=.) or (paramcd='RASHOCYN' and AVALC^='');
+    run;
+
+    proc sort data=temp1 out=any nodupkey;
+    by subjid trt cohort;
+    where (parcat1='SYSTEMIC' and ATOXGRN>0) or (paramcd='RASHOCYN' and AVALC='Y');
+    run;
+  %end;
+
+  proc freq data=n1 noprint;
+  table trt*cohort/norow nocol nopercent nocum out=denom;
+  run;
+
+
+  proc freq data=any;
+  table trt*cohort/norow nocol nopercent nocum out=num;
+  run;
+
+
+  data ar;
+  merge denom(rename=count=denom drop=percent) num(rename=count=n drop=percent);
+  by trt cohort;
+  run;
+
+  data ar;
+  set ar;
+  if n=. then n=0;
+  run;
+
+  data clopper;
+  set ar;
+  n1=denom-n;
+  rename n=Y n1=N;
+  run;
+
+  proc transpose data=clopper out=clopper_ar;
+  by trt cohort;
+  var y n;
+  run;
+
+  proc freq data=clopper_ar;
+  ods output binomialcls=ci;
+  by trt cohort;
+  tables _name_/ nocum norow binomial (LEVEL="Y" ALL);;
+  weight col1 / zeros;
+  run;
+
+  data &dataout.;
+  set ci;
+  lowercl=lowercl*100;
+  uppercl=uppercl*100;
+  where type='Clopper-Pearson (Exact)';
+  drop table proportion type;
+  run;
+
+%end;
+   
+
+%if &datain.=ADAR %then %do;
+  data &datain.;
+  set adb.&datain.;
+  where &sar.='Y' and ATPTREF in &vac. and PARAMCD not in ('RASH', 'LYMPHOCC') and ANL01FL='Y';
+  run;
+
+  
+  data temp;
+  set &datain.;
+  length trt $20;
+  trt=trt01a;
+  output;
+  if index(trt01a, 'mRNA-1273') then trt='mRNA-1273 Total';
+  output;
+  run;
+
+  data temp1;
+  set temp;
+  length cohort $20;
+  cohort=AGEGR1;
+  output;
+  if AGEGR1^='' then cohort='Overall';;
+  output;
+  run;
+
+  %if &sec.='AR' %then %do;
+    proc sort data=temp1 out=n1 nodupkey;
+    by subjid trt cohort atptgr1;
+    where (paramcd^='RASHOCC' and ATOXGRN^=.) or (paramcd='RASHOCC' and AVALC^='');
+    run;
+
+    proc sort data=temp1 out=any nodupkey;
+    by subjid trt cohort atptgr1;
+    where (paramcd^='RASHOCC' and ATOXGRN>0) or (paramcd='RASHOCC' and AVALC='Y');
+    run;
+  %end;
+
+ %if &sec.='LAR' %then %do;
+    proc sort data=temp1 out=n1 nodupkey;
+    by subjid trt cohort atptgr1;
+    where parcat1='LOCAL' and ATOXGRN^=.;
+    run;
+
+    proc sort data=temp1 out=any nodupkey;
+    by subjid trt cohort atptgr1;
+    where parcat1='LOCAL' and ATOXGRN>0;
+    run;
+  %end;
+
+  %if &sec.='SAR' %then %do;
+    proc sort data=temp1 out=n1 nodupkey;
+    by subjid trt cohort atptgr1;
+    where (parcat1='SYSTEMIC' and ATOXGRN^=.) or (paramcd='RASHOCC' and AVALC^='');
+    run;
+
+    proc sort data=temp1 out=any nodupkey;
+    by subjid trt cohort atptgr1;
+    where (parcat1='SYSTEMIC' and ATOXGRN>0) or (paramcd='RASHOCC' and AVALC='Y');
+    run;
+  %end;
+
+  proc freq data=n1 noprint;
+  table trt*cohort*atptgr1/norow nocol nopercent nocum out=denom;
+  run;
+
+
+  proc freq data=any;
+  table trt*cohort*atptgr1/norow nocol nopercent nocum out=num;
+  run;
+
+
+  data ar;
+  merge denom(rename=count=denom drop=percent) num(rename=count=n drop=percent);
+  by trt cohort atptgr1;
+  run;
+
+  data ar;
+  set ar;
+  if n=. then n=0;
+  run;
+
+  data clopper;
+  set ar;
+  n1=denom-n;
+  rename n=Y n1=N;
+  run;
+
+  proc transpose data=clopper out=clopper_ar;
+  by trt cohort atptgr1;
+  var y n;
+  run;
+
+  proc freq data=clopper_ar;
+  ods output binomialcls=ci;
+  by trt cohort atptgr1;
+  tables _name_/ nocum norow binomial (LEVEL="Y" ALL);
+  weight col1 / zeros;
+  run;
+
+  data &dataout.;
+  set ci;
+  lowercl=lowercl*100;
+  uppercl=uppercl*100;
+  where type='Clopper-Pearson (Exact)';
+  drop table proportion type;
+  run;
+
+%end;
+%end;
+
+%if &datain. =ADIS %then %do;
+  data &datain.;
+  set adb.&datain.;
+  where &subset.;
+  run;
+
+  data temp;
+  set &datain.;
+  length trt $20;
+  trt=trt01p;
+  output;
+  if index(trt01p, 'mRNA-1273') then trt='mRNA-1273 Total';
+  output;
+  run;
+
+  data temp1;
+  set temp;
+  length cohort $20;
+  cohort=AGEGR1;
+  output;
+  if AGEGR1^='' then cohort='Overall';;
+  output;
+  run;
+
+  proc sort data=temp1 out=n1 nodupkey;
+  by subjid trt cohort avisit paramcd;
+  run;
+
+  proc sort data=temp1 out=any nodupkey;
+  by subjid trt cohort avisit paramcd;
+  where &CRIT. ='Y';
+  run;
+
+  proc freq data=n1 noprint;
+  table trt*cohort*paramcd*avisit/norow nocol nopercent nocum out=denom;
+  run;
+
+
+  proc freq data=any;
+  table trt*cohort*paramcd*avisit/norow nocol nopercent nocum out=num;
+  run;
+
+
+  data sc;
+  merge denom(rename=count=denom drop=percent) num(rename=count=n drop=percent);
+  by trt cohort paramcd avisit;
+  run;
+
+  data sc;
+  set sc;
+  if n=. then n=0;
+  if avisit='Baseline' then delete;
+  run;
+
+  data clopper;
+  set sc;
+  n1=denom-n;
+  rename n=Y n1=N;
+  run;
+
+  proc transpose data=clopper out=clopper_sc;
+  by trt cohort paramcd avisit;
+  var y n;
+  run;
+
+  proc freq data=clopper_sc;
+  ods output binomialcls=ci;
+  by trt cohort paramcd avisit;
+  tables _name_/ nocum norow binomial (LEVEL="Y" ALL);
+  weight col1 / zeros;
+  run;
+
+  data &dataout.;
+  set ci;
+  lowercl=lowercl*100;
+  uppercl=uppercl*100;
+  where type='Clopper-Pearson (Exact)';
+  drop table proportion type;
+  run;
+
+
+%end;
+   
+%mend clopper;
+
+
+
+
+
+

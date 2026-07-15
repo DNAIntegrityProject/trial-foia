@@ -1,0 +1,146 @@
+*************************************************************************************************;
+* 
+*           CLIENT:  ModernaTX, Inc.
+*         PROTOCOL:  mRNA-1273-P301
+*
+*          PURPOSE: Create analysis dataset adrisk
+*      
+*      INPUT FILES: SDTM domains
+*     OUTPUT FILES: ADRISK.sas7bdat
+*
+*      USAGE NOTES: 
+*      
+*************************************************************************************************;
+*  Copyright 2020 Pharmaceutical Product Development, Inc.
+*  All Rights Reserved. 
+*************************************************************************************************;
+
+options noquotelenmax;
+%include "madam.sas";
+
+**Assign global macro variable DSETNAME to reflect the name of the final ADaM dataset**;
+%global DSETNAME;
+%let dsetname = adrisk;
+%let adslvar=tr01sdt tr01sdtm tr01edt tr01edtm dose2dt dos2dtm;
+
+**Merge supplemental data onto parent domain**;
+%revsupp(libin=trans,libout=work,ds=sc,supp=suppsc,outds=sc_all);
+proc sort tagsort data=sc_all; by usubjid subjid; where sccat='COVID-19 EXPOSURE'; run;
+
+proc format;
+	value $ramcd
+	"OTHER OCCUPATIONAL RISK" = "OTHEROCC"
+	"OTHER LOCATION AND LIVING CIRCUMSTANCES RISK" = "OTHERLOC"
+	"NO RISK IDENTIFIED" = "NORISK"
+	"MULTI-FAMILY DWELLING" = "MULTIFAM"
+	"NURSING HOME OR ASSISTED LIVING FACILITY" = "NURSHOM" 
+	"SINGLE FAMILY HOME" = "SINFAM"
+	"HIGH DENSITY HOUSING" = "HIGHDEN"
+	"LOW DENSITY, MULTI-FAMILY SETTING" = "LOWDEN"
+	"BORDER PROTECTION AND MILITARY PERSONNEL" = "MILITARY"
+	"EDUCATORS AND STUDENTS" = "EDUSTDT"
+	"EMERGENCY RESPONSE" = "EMERGRES"
+	"HEALTHCARE WORKERS" = "HLTHWRKR"
+	"HOSPITALITY AND TOURISM WORKERS" = "HPTLTY"
+	"MANUFACTURING AND PRODUCTION OPERATIONS" = "MFGOP"
+	"PASTORAL, SOCIAL, PUBLIC HEALTH WORKERS" = "PASTWRKR"
+	"PERSONAL CARE AND IN-HOME SERVICES" = "PCIHS"
+	"RETAIL OR RESTAURANT OPERATIONS" = "RETAIL"
+	"TRANSPORTATION AND DELIVERY SERVICES" = "TRANS"
+	"WAREHOUSE SHIPPING, FULFILLMENT CENTERS" = "WHSSHIP";
+
+	value $ram
+	'OTHEROCC' = 'Other Occupational Risk'
+	'OTHERLOC' ='Other Location And Living Circumstances Risk'
+	'NORISK' = 'No Risk Identified'
+	'MULTIFAM' = 'Resides in Multi-Family Dwelling'
+	'NURSHOM' = 'Resides in Nursing Home or Assisted Living Facility'
+	'SINFAM' = 'Resides in a Single Family Home'
+	'HIGHDEN' = 'Resides in High Density Housing'
+	'LOWDEN' = 'Resides in Low Density, Multi-Family Setting'
+	'MILITARY' = 'Border Protection and Military Personnel'
+	'EDUSTDT' = 'Educators and Students'
+	'EMERGRES' = 'Emergency Response'
+	'HLTHWRKR' = 'Healthcare Workers'
+	'HPTLTY' = 'Hospitality and Tourism Workers'
+	'MFGOP' = 'Manufacturing and Production Operations'
+	'PASTWRKR' = 'Pastoral, Social or Public Health Workers'
+	'PCIHS' = 'Personal Care and In-Home Services'
+	'RETAIL' = 'Retail or Restaurant Operations'
+	'TRANS' = 'Transportation and Delivery Services'
+	'WHSSHIP' = 'Warehouse Shipping and Fulfillment Centers';
+run;
+
+**INSERT CODE TO GENERATE DATASET**;
+data sc_adsl;
+	merge sc_all(in=a) adb.adsl(in=b keep=USUBJID subjid &adslvar.);
+	by usubjid subjid;
+	if a and b;
+run;
+
+data adrisk;
+	length PARAM OTHSPY $200 parcat1 $50 AVALC $100;
+	set sc_adsl;
+
+	ASEQ = scseq;
+
+	PARCAT1 = scscat;
+	if scscat='OCCUPATIONAL RISK' then PARCAT1N = 1;
+	else if scscat='LOCATION AND LIVING CIRCUMSTANCES RISK' then PARCAT1N = 2;
+
+	if sctest^='Other' then PARAM = sctest;
+	else if PARCAT1N=1 then PARAM = 'Other Occupational Risk';
+	else if PARCAT1N=2 then PARAM = 'Other Location And Living Circumstances Risk';
+	PARAMCD = put(upcase(param),$ramcd.);
+	PARAM = put(paramcd,$ram.);
+
+	AVALC = SCSTRESC;
+	if PARAMCD in ('OTHERLOC' 'OTHEROCC') then do;
+		if scstresc in ('N') then AVALC = 'N';
+		else if scstresc^='' then AVALC = 'Y';
+	end; 
+
+	if PARAMCD in ('OTHEROCC' 'OTHERLOC') then OTHSPY = SCSTRESC;
+
+	adt=.; adtm=.;
+	drop &adslvar.;
+run;
+
+**Generate final dataset by updating certain attributes. Optionally merge common variables & create sequence variable as needed**;
+%trta(dsname=&DSETNAME);
+
+%adam_dataset_update(
+	ds=&DSETNAME,
+	libin=work, 
+	libout=output,
+	adsllib=adb,
+	addcomvar=Y,
+	addseq=,
+	dropinfmt=Y,
+	mapspecfile=&ADAM_SPEC,
+	maploc=&ADAM_SPEC_LOC,
+	debug=N
+	);
+	
+	
+**Generate Value Level Metadata values for the ad<xx> dataset**;
+%* dod_vlm(        
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&ADAM_SPEC_LOC,
+	specname=&ADAM_SPEC,
+	debug=N
+	);
+
+**Generate Enhanced Controlled Terminology for the ad<xx> dataset**;
+%* dod_enhcd_ct(            
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&ADAM_SPEC_LOC,
+	specname=&ADAM_SPEC,
+	map_ct_nm=,
+	map_ct_loc=,
+	debug=N
+	);

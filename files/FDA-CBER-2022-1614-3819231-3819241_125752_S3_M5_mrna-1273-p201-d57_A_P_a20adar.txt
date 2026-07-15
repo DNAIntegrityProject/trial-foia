@@ -1,0 +1,467 @@
+************************************************************************
+*           CLIENT: Moderna
+*         PROTOCOL: mRNA-1273-p201
+* 
+*          PURPOSE:  Create ADAR Dataset
+*
+*      INPUT FILES:  TRANS.face, TRANS.vs
+*     OUTPUT FILES:  ADAR.LST, ADAR.LOG, ADAR.sas7bdat
+*
+*      USAGE NOTES:  
+*      
+*************************************************************************
+*  © Pharmaceutical Product Development, Inc., 2020
+*  All Rights Reserved.
+*************************************************************************;
+
+dm'log;clear;output;clear';
+options missing = ' ' validvarname=upcase compress=yes;
+options mprint nomprint missing=' ';
+
+%include "madam.sas";
+
+proc format;
+	value $pamcd (multilabel)
+	'Rash' = 'RASH'
+	'Rash Occurrence' = 'RASHOCC'
+	'Lymphadenopathy Occurrence' = 'LYMPHOCC'
+	'Lymphadenopathy' = 'LYMPH'
+	'Pain' = 'PAIN'
+	'Erythema Longest Diameter (mm)'  = 'ERYTHDIA'
+	'Swelling Longest Diameter (mm)'  = 'SWELLDIA'
+	'Headache' = 'HEADACHE'
+	'Fatigue' = 'FATIGUE'
+	'Myalgia' = 'MYALGIA'
+	'Arthralgia' = 'ARTHRALG'
+	'Nausea/Vomiting' = 'NAUSEA'
+	'Chills' = 'CHILLS'
+	'Receive Medical Attention?' = 'MEDATTEN'
+	'Fever (C)'  = 'FEVER'
+	;
+	
+	
+run;
+
+%revsupp(libin=TRANS, libout=WORK, ds=FACE, supp=SUPPface);
+
+%revsupp(libin=TRANS, libout=WORK, ds=VS, supp=SUPPvs);
+
+data fa;
+	set face;
+run;
+
+data co;
+	set trans.co;
+run;
+
+%REVCO(libin=work, libout=WORK, ds=fa, outds=faco,comds=CO,delco=Y,movco=Y);
+
+proc sort data=adb.adsl out=adsl; by studyid usubjid; run;
+
+data ar1;
+length  MAAEFL $1.;
+	merge ADSL (in=ina) faco (in=inface rename = (MAAEFL = _MAAEFL));
+	by studyid usubjid;	
+	if ina and inface;
+	if faobj in ('Erythema','Swelling') and index(upcase(fatest), 'OCCURRENCE') > 0 and FAORRES = 'Y' then delete;
+	MAAEFL = _MAAEFL;
+	drop _MAAEFL;
+run;
+
+/*proc freq data=ar1; tables faobj*fatest /list missing; run;
+
+proc freq data=ar1; tables faobj*fatest*faorres /list missing; where faobj in ('Erythema','Swelling'); run;*/
+
+proc freq data=ar1; tables fatpt /list missing; run;
+
+proc print data=ar1; where fatpt = 'DAY 0'; var usubjid faobj fatest faorres fatpt fadtc; run;
+
+data ar2;
+	merge adsl (in=ina) vs (in=invs drop=subjid);
+	by studyid usubjid;
+	if ina and invs;
+	if vscat = 'REACTOGENICITY' and . < vstptnum <= 7;
+run;
+
+/*proc print data=ar2; where usubjid = 'mRNA-1273-P201-US203-1095' and VSTESTCD = 'TEMP'; var usubjid vstestcd vstest vstpt vsseq vsstresn vsstresu; run;*/
+
+/*proc freq data=ar2; tables vscat*vstestcd*vsstresu /list missing; run;*/
+
+data ar3;
+	set ar1(in=ar1 rename=(domain=_domain lymphevl=_lymphevl srevl=_srevl)) ar2(in=ar2 rename=(medtakp=_medtakp medtakt = _medtakt medtak = _medtak));
+
+	*** SRCDOM, SRCSEQ, SRCVAR ***;
+	length SRCDOM $20 SRCVAR $50;
+	if ar1 then do;
+		SRCDOM = strip(_domain);
+		SRCSEQ = faseq;
+		SRCVAR = 'FASTRESC';
+	end;
+	if ar2 then do;
+		SRCDOM = strip(domain);
+		SRCSEQ = vsseq;
+		SRCVAR = 'VSSTRESN';
+	end;
+	
+*** PARAMCD/PARAM ***;
+	length PARAMCD $8 PARAM $200;
+	if ar1 then do;
+		if faobj = 'Rash' and fatestcd ne 'SEV' then param = 'Rash Occurrence';
+		else if faobj = 'Solicited Rash' then param = 'Rash';
+		else if faobj = 'Underarm Gland Swelling or Tenderness' and fatestcd = 'SEV' then param = 'Lymphadenopathy'; 
+		else if faobj = 'Nausea/Vomiting' and fatestcd = 'SEV' then param = 'Nausea/Vomiting';
+		else if faobj = 'Lymphadenopathy' then param = 'Lymphadenopathy Occurrence';
+		else if faobj in ('Erythema','Swelling') and upcase(fatest) = 'OCCURRENCE INDICATOR' then param = strip(faobj)||' Longest Diameter (mm)';
+		else if faobj in ('Erythema','Swelling') and index(upcase(fatest), 'INTENSITY' ) > 0  then param = strip(faobj)||' Longest Diameter (mm)';
+		else if faobj in ('Erythema','Swelling') and upcase(fatest) ='LONGEST DIAMETER' then param =strip(faobj)||' '||strip(propcase(fatest))||' ('||strip(FAORRESU)||')';
+		else if faobj in ('Fever')  then param = 'Fever (C)';
+		else param = strip(faobj);
+	end;
+	if ar2 then do;
+		if vstestcd = 'TEMP' then param = 'Fever'||' ('||strip(vsstresu)||')';
+		if vstestcd = 'VSALL' then param = 'Fever (C)';
+	end;
+
+	paramcd = strip(put(param, $pamcd.));
+	
+	*** ATPT ***;
+	length ATPT $50;
+	if ar1  then do;
+	    if FAEVAL='STUDY SUBJECT'  then atpt=strip(CRFTMPT);
+	    if FAEVAL='INVESTIGATOR'   then atpt=strip(FATPT); 
+	end; 
+		
+	if ar2 then atpt=strip(VSTPT);
+	
+	if ATPT = 'DAY 1' and  FAEVAL='INVESTIGATOR' and PARAMCD not in ('RASH' 'LYMPHOCC' ) then ATPT = 'DAY 1, AFTER VACCINATION (AT HOME)';
+
+	*** ATPTN ***;
+	if ATPT = 'DAY 1, 1 HOUR AFTER VACCINATION (AT STUDY CLINIC)' then ATPTN = 1.1;
+	else if ATPT = 'DAY 1, AFTER VACCINATION (AT HOME)' then ATPTN = 1.2;
+	else if index(ATPT,'DAY') > 0 then ATPTN = input(substr(ATPT,index(ATPT, 'DAY')+4),best.);
+
+	if ATPT = 'DAY 0' then do;
+		ATPTN = .;
+		put 'ALERT_C: subject with DAY 0 ' USUBJID ' ' SRCDOM ' ' SRCSEQ ' ' ATPT; 
+	end;
+
+	*** ATPTREF ***;
+	length ATPTREF $50;
+	if ar1 then do;
+		if index(upcase(fatptref),'DOSE 1') > 0 then ATPTREF = 'Vaccination 1';
+		else if index(upcase(fatptref),'DOSE 2') > 0 then ATPTREF = 'Vaccination 2';
+	end;
+	if ar2 then do;
+		if index(upcase(vstptref),'DOSE 1') > 0 then ATPTREF = 'Vaccination 1';
+		else if index(upcase(vstptref),'DOSE 2') > 0 then ATPTREF = 'Vaccination 2';
+	end;
+
+	*** ATPTGR1, ATPTGR1N ***;
+	length ATPTGR1 $50;
+	if index(ATPT, 'DAY 1') > 0  then ATPTGR1 = 'DAY 1';
+	else ATPTGR1 = strip(ATPT);
+	
+	if not missing(ATPTGR1) then ATPTGR1N = input(substr(ATPTGR1, index(ATPTGR1,'Day')+4), best.);
+	if ATPTGR1 = 'DAY 0' then ATPTGR1N = .;	
+	
+	
+
+    *** Numeric of FADTC, VSDTC ***;
+    %iso2sas(isodate = fadtc, datec = fadtc9, daten =fadtn, timec = fatmc);
+    %iso2sas(isodate = vsdtc, datec = vsdtc9, daten =vsdtn, timec = vstmc);
+	
+	*** ADT, ATM, ADTM, ADY ***;
+	if ar1 then do;
+		adt = fadtn;
+		atm = input(fatmc,time5.);
+		if not missing(fadtc9) and not missing(fatmc) then adtm = input(fadtc,E8601DT.);
+		ady = fady;
+	end;
+	if ar2 then do;
+		adt = vsdtn;
+		atm = input(vstmc, time5.);
+		if not missing(vsdtc9) and not missing(vstmc) then adtm = input(vsdtc,E8601DT.);
+		ady = vsdy;
+	end;
+
+	*** AVAL, AVALC ***;
+	length AVALC $100;
+	if ar1 then do;
+		avalc = strip(fastresc); 
+		if faobj in ('Erythema','Swelling') and index(upcase(fatest), 'OCCURRENCE')>0 then do; 
+			if faorres = 'N' then aval = 0;
+			else aval = fastresn;
+		end;
+		else aval = fastresn;
+	end;
+	if ar2 then do;
+		aval = vsstresn;
+		avalc = strip(vsstresc);
+	end; 
+	
+	%macro ATOXGR();
+		if index(upcase(FASTRESC),"GRADE 0") > 0 then ATOXGR = 'Grade 0';
+		if index(upcase(FASTRESC),"GRADE 1") > 0 then ATOXGR = 'Grade 1';
+		if index(upcase(FASTRESC),"GRADE 2") > 0 then ATOXGR = 'Grade 2'; 
+		if index(upcase(FASTRESC),"GRADE 3") > 0 then ATOXGR = 'Grade 3';
+		if index(upcase(FASTRESC),"GRADE 4") > 0 then ATOXGR = 'Grade 4';
+	%mend;
+	
+	*** ATOXGR ***;
+	length ATOXGR $20;
+	if paramcd in ('ERYTHDIA','SWELLDIA') then do;
+		if . < aval < 25 then ATOXGR = 'Grade 0';
+		else if 25 <= aval <= 50 then ATOXGR = 'Grade 1';
+		else if 51 <= aval <= 100 then ATOXGR = 'Grade 2';
+		else if aval > 100 then ATOXGR = 'Grade 3';
+		
+		%ATOXGR();
+	end;
+	if paramcd = 'FEVER' then do;
+		if . < aval < 38.0 then ATOXGR = 'Grade 0';
+		else if 38.0 <= aval <  38.4 then ATOXGR = 'Grade 1';
+		else if 38.4 <= aval <= 38.9 then ATOXGR = 'Grade 2';
+		else if 38.9 <  aval <= 40.0 then ATOXGR = 'Grade 3';
+		else if aval > 40 then ATOXGR = 'Grade 4';
+		
+		%ATOXGR();
+	end;
+	if paramcd in ('PAIN') then do;
+		if FASTRESC = 'NONE' then ATOXGR = 'Grade 0';
+		else if FASTRESC = 'DOES NOT INTERFERE WITH ACTIVITY' then ATOXGR = 'Grade 1';
+		else if FASTRESC = 'REPEATED USE OF OVER-THE-COUNTER PAIN RELIEVER > 24 HOURS OR INTERFERES WITH ACTIVITY' then ATOXGR = 'Grade 2';
+		else if FASTRESC = 'ANY USE OF PRESCRIPTION PAIN RELIEVER OR PREVENTS DAILY ACTIVITY' then ATOXGR = 'Grade 3';
+		
+		%ATOXGR();
+	end;
+	if paramcd in ('LYMPH') then do;
+		if FASTRESC = 'NONE' then ATOXGR = 'Grade 0';
+		else if FASTRESC = 'DOES NOT INTERFERE WITH ACTIVITY' then ATOXGR = 'Grade 1';
+		else if index(FASTRESC,'REPEATED USE OF OVER-THE-COUNTER PAIN RELIEVER > 24 HOURS OR INTERFER')>0 then ATOXGR = 'Grade 2';
+		else if FASTRESC = 'ANY USE OF PRESCRIPTION PAIN RELIEVER OR PREVENTS DAILY ACTIVITY' then ATOXGR = 'Grade 3';
+		
+		%ATOXGR();
+	end;
+	if paramcd in ('HEADACHE') then do;
+		if FASTRESC = 'NONE' then ATOXGR = 'Grade 0';
+		else if FASTRESC = 'NO INTERFERENCE WITH ACTIVITY' then ATOXGR = 'Grade 1';
+		else if index(FASTRESC,'REPEATED USE OF OVER-THE-COUNTER PAIN RELIEVER > 24 HOURS OR SOME INTERFER')>0 then ATOXGR = 'Grade 2';
+		else if FASTRESC = 'ANY USE OF PRESCRIPTION PAIN RELIEVER OR PREVENTS DAILY ACTIVITY' then ATOXGR = 'Grade 3';
+		
+		%ATOXGR();
+	end;
+	if paramcd in ('FATIGUE','MYALGIA','ARTHRALG') then do;
+		if FASTRESC = 'NONE' then ATOXGR = 'Grade 0'; 
+		if FASTRESC = 'NO INTERFERENCE WITH ACTIVITY' then ATOXGR = 'Grade 1';
+		if FASTRESC = 'SOME INTERFERENCE WITH ACTIVITY' then ATOXGR = 'Grade 2';
+		if FASTRESC = 'SIGNIFICANT; PREVENTS DAILY ACTIVITY' then ATOXGR = 'Grade 3';
+		
+		%ATOXGR();
+	end;
+	if paramcd = 'NAUSEA' then do;
+		if FASTRESC = 'NONE' then ATOXGR = 'Grade 0'; 
+		if FASTRESC= 'NO INTERFERENCE WITH ACTIVITY OR 1-2 EPISODES/24 HOURS' then ATOXGR = 'Grade 1';
+		if FASTRESC= 'SOME INTERFERENCE WITH ACTIVITY OR >2 EPISODES/24 HOURS' then ATOXGR = 'Grade 2';
+		if FASTRESC= 'PREVENTS DAILY ACTIVITY, REQUIRES OUTPATIENT IV HYDRATION' then ATOXGR = 'Grade 3';
+		
+		%ATOXGR();
+	end;
+	if paramcd = 'CHILLS' then do;
+		if FASTRESC = 'NONE' then ATOXGR = 'Grade 0'; 
+		if FASTRESC = 'NO INTERFERENCE WITH ACTIVITY' then ATOXGR = 'Grade 1';
+		if FASTRESC = 'SOME INTERFERENCE WITH ACTIVITY NOT REQUIRING MEDICAL ATTENTION' then ATOXGR = 'Grade 2';
+		if FASTRESC = 'PREVENTS DAILY ACTIVITY AND REQUIRES MEDICAL ATTENTION' then ATOXGR = 'Grade 3';
+		
+		%ATOXGR();
+	end;
+	if paramcd = 'RASH' then do;
+		%ATOXGR();
+	end;
+	if not missing(ATOXGR) then ATOXGRN = input(substr(ATOXGR,7,1), best.);
+	
+	*** CRIT1-CRIT4 ***;	
+	length CRIT1FL CRIT2FL CRIT3FL CRIT4FL $1 CRIT1 CRIT2 CRIT3 CRIT4 $20;
+	if paramcd = 'FEVER' and not missing(aval) then do;
+		if (9*aval/5)+32 > 104.1 then do;
+			CRIT4FL = 'Y';
+			CRIT4 = '> 104.1 degrees F';
+		end;
+		if (9*aval/5)+32 > 103.6 then do;
+			CRIT3FL = 'Y';
+			CRIT3 = '> 103.6 degrees F';
+		end;
+		if (9*aval/5)+32 > 103.1 then do;
+			CRIT2FL = 'Y';
+			CRIT2 = '> 103.1 degrees F';
+		end;
+		if (9*aval/5)+32 > 102.6 then do;
+			CRIT1FL = 'Y';
+			CRIT1 = '> 102.6 degrees F';
+		end;
+	end;
+
+	*** PARCAT1 ***;	
+	length PARCAT1 $50;
+	if ar1 then do;
+	   if FASCAT = 'ADMINISTRATION SITE' then PARCAT1 = 'LOCAL';
+	   else parcat1 = strip(fascat);
+	   if upcase(paramcd) = 'RASH' then parcat1 = 'SYSTEMIC';
+	   if upcase(paramcd) = 'LYMPHOCC' then parcat1 = 'LOCAL';
+	end;
+	if ar2 then do;
+		parcat1 = strip(vsscat);
+	end;
+
+	*** PARCAT1N ***;
+	if parcat1 = 'LOCAL' then PARCAT1N = 1;
+	else if parcat1 = 'SYSTEMIC' then parcat1N = 2;
+	
+	***ASTAT ***;
+	length ASTAT $20;
+	if ar1 then ASTAT = strip(fastat);
+	if ar2 then ASTAT = strip(vsstat);
+	
+	*** LYMPHEVL, SREVLFL ***;
+	length LYMPHEVL SREVLFL $1;
+	if not missing(_LYMPHEVL) then LYMPHEVL = strip(_LYMPHEVL);
+	if not missing(_SREVL) then SREVLFL = strip(_SREVL);
+
+	*** LYMPHCOM, SRCOMM ***;
+	if LYMPHCOM = '' then LYMPHCOM = strip(LYMPHCOM);
+	if SRCOMM = '' then SRCOMM = strip(SRCOMM);
+
+	if ASTAT = 'NOT DONE' then delete;
+
+	*** MEDTAKP, MEDTAKT, MEDTAK ***;
+	length MEDTAKP MEDTAKT MEDTAK $1;
+	if not missing(_MEDTAKP) then MEDTAKP = strip(_MEDTAKP);
+	if not missing(_MEDTAKT) then MEDTAKT = strip(_MEDTAKT);
+	if not missing(_MEDTAK) then MEDTAK = strip(_MEDTAK);
+
+	if FAEVAL='STUDY SUBJECT' or (PARAMCD='FEVER' and FAEVAL='') then ANL01_CHK = 0;
+	else ANL01_CHK = 1;
+	
+	if AVALC = 'Y' then AVALC_CHK = 0;
+	else AVALC_CHK = 1;
+	 	
+	format ADT Date9. ATM time5. ADTM datetime15.;
+	
+	drop _: fadtc9 fadtn fatmc vsdtc9 vsdtn vstmc ;
+run;
+
+ 
+*ANL02FL derivation;
+proc sort data = ar3;
+	by usubjid parcat1 paramcd atptref atptn descending ATOXGRN ANL01_CHK AVALC_CHK adt adtm;
+run; 
+
+*** ANL02FL***;
+data ar3;
+	set ar3;
+	by  usubjid parcat1 paramcd atptref atptn  descending ATOXGRN ANL01_CHK AVALC_CHK adt adtm;
+	if first.atptn then ANL02FL = 'Y';
+run;
+
+proc sort data=ar3; by usubjid parcat1 paramcd atptref atptn adt adtm srcseq; run;	
+data adar;
+	set ar3;
+	by usubjid parcat1 paramcd atptref atptn adt adtm srcseq;
+	retain aseq;	
+	if first.usubjid then aseq = 1;
+	else aseq = aseq + 1;
+run;
+ 
+
+proc freq data=adar; tables param*paramcd /list missing; run;
+
+*** ANL01FL***;
+data adar1 adar2;
+	set adar;
+	if paramcd in ('RASHOCC','LYMPHOCC') then output adar1;
+	else output adar2;
+run;
+
+data anl01fla;
+	set adar1;
+	if not missing(avalc);
+	keep usubjid param atptref atptgr1 avalc adt aseq ANL01_CHK AVALC_CHK;
+run; 
+
+proc sort data=anl01fla; by usubjid param atptref atptgr1 AVALC_CHK ANL01_CHK  avalc adt  aseq; run;
+
+data anl01fla;
+	set anl01fla;
+	by usubjid param atptref atptgr1 AVALC_CHK  ANL01_CHK  avalc adt  aseq; 
+	if first.atptgr1;
+	anl01fl = 'Y';
+	keep usubjid param atptref atptgr1 avalc adt aseq anl01fl;
+run;
+ 
+	
+
+proc sort data=anl01fla; by usubjid param atptref atptgr1 adt aseq avalc; run;
+
+data anl01flb;
+	set adar2;
+	if not missing(atoxgrn);
+	keep usubjid param atptref atoxgrn atptgr1 adtm adt aseq ANL01_CHK  AVALC_CHK;
+run; 
+
+proc sort data=anl01flb; by usubjid param atptref atptgr1 descending atoxgrn descending AVALC_CHK ANL01_CHK  adt ANL01_CHK adtm aseq; run;
+ 
+
+data anl01flb;
+	set anl01flb;
+	by usubjid param atptref atptgr1 descending atoxgrn descending AVALC_CHK  ANL01_CHK adt  adtm  aseq;
+	if first.atptgr1;
+	anl01fl = 'Y';
+	keep usubjid param atptref atptgr1 atoxgrn adtm adt aseq anl01fl;
+run;
+ 
+proc sort data=adar1; by usubjid param atptref atptgr1 adt aseq avalc; run;
+
+data adar1;
+	merge adar1(in=a) anl01fla(in=b);
+	by usubjid param atptref atptgr1 adt aseq avalc; 
+	if a;
+run;
+
+proc sort data=adar2; by usubjid param atptref atptgr1 adtm adt aseq atoxgrn; run;
+
+proc sort data=anl01flb; by usubjid param atptref atptgr1 adtm adt aseq atoxgrn; run;
+
+data adar2;
+	merge adar2(in=a) anl01flb(in=b);
+	by usubjid param atptref atptgr1 adtm adt aseq atoxgrn; 
+	if a;
+run;
+
+data adar;
+length USUBJID STUDYID $200.;
+	set adar1 adar2;
+run;
+
+proc freq data=adar; tables parcat1n*parcat1*paramcd /list missing; run;
+
+proc freq data=adar; tables SRCDOM /list missing; run;
+
+proc sort data=adar; by usubjid atptref; run; 
+
+%trta(dsname=adar);
+
+proc freq data=adar; tables atptref*trta*trtan /list missing; run;
+
+proc freq data=adar; tables srcdom*atptn*atpt /list missing; run;
+ 
+
+%ADaM_Dataset_Update(
+    ds=ADAR
+   ,libin=WORK
+   ,libout=output
+   ,adsllib=ADB
+   ,addcomvar=Y
+   ,addseq=N
+   ,dropinfmt=Y
+   ,mapspecfile= &ADAM_SPEC
+   ,maploc=&ADAM_SPEC_LOC
+   ,debug=N); 

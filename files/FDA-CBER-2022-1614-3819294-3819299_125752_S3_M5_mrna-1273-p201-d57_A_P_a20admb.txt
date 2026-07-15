@@ -1,0 +1,246 @@
+*************************************************************************************************;
+* 
+*           CLIENT:  ModernaTX, Inc.
+*         PROTOCOL:  mRNA-1273-P201
+*
+*          PURPOSE: Create analysis dataset admb
+*      
+*      INPUT FILES: SDTM domains
+*     OUTPUT FILES: admb.sas7bdat
+*
+*      USAGE NOTES: 
+*      
+*************************************************************************************************;
+*  (c) 2020 PPD
+*  All Rights Reserved. 
+*************************************************************************************************;
+
+options noquotelenmax;
+%include "madam.sas";
+**Assign global macro variable DSETNAME to reflect the name of the final ADaM dataset**;
+%global DSETNAME;
+%let dsetname = admb;
+%let adam_spec_loc = &g_projectpath.&g_toplevel.\Documents\Specs;
+%let adam_spec = Moderna mRNA1273P201 ADaM spec.xlsm;
+%let adslvar=tr01sdt dose2dt tr01sdtm tr01edtm dose1fl dose2fl eosdt dthdt randfl sex;
+
+proc format;
+	value $avalc
+	'NOT DETECTED' = 'Not Detected'
+	'NOTDETECTED' = 'Not Detected';
+run;
+
+**Merge supplemental data onto parent domain**; 
+%revsupp(
+libin=TRANS, 
+libout=WORK, 
+ds=mb, 
+supp=suppmb,
+outds=mb_all,
+maploc=&G_PROJECTPATH.\&G_toplevel.\Databases\Transformed,
+mapspec=&G_NICKNAME._mapping_spec.xlsx
+);
+
+proc sort tagsort data=mb_all; 
+	by usubjid mbcat mbtestcd mbdtc; 
+	where missing(mbstat) and not missing(mbtestcd);
+run;
+
+**INSERT CODE TO GENERATE DATASET**;
+data mb_adsl;
+	merge mb_all(in=a rename=(localfl=_localfl)) adb.adsl(in=b keep=USUBJID &adslvar.);
+	by usubjid;
+	if a and b;
+run;
+
+proc sort tagsort data=mb_adsl; by usubjid mbdtc mbtestcd; run;
+
+data mb_adsl;
+	length PARAMCD $8 PARAM PARCAT1 AVALC $50 LOCALFL $1;
+	set mb_adsl;
+	by usubjid mbdtc mbtestcd;
+
+	PARCAT1 = mbcat;
+	* paramcd;
+	PARAMCD = mbtestcd;
+	* param;
+	PARAM = mbtest;
+	* results AVAL;
+	AVALC = put(mbstresc,$avalc.);
+	AVALC = propcase(AVALC);
+
+	LOCALFL = _localfl;
+
+	* _avaln;
+		if ^missing(mbstresc) then _avaln = 1; else _avaln = 0;
+
+
+	* Analysis Date/time;
+	%ISO2SAS(isodate=MBDTC, datec=_mbdtc, daten=ADT, timec=_atmc);
+	if ^missing(_atmc) then ATM = input(_atmc,time5.);
+	if ^missing(_atmc) and ^missing(ADT) then ADTM = input(compress(put(ADT,date9.)||':'||_atmc),datetime20.);
+
+		if ADT>=TR01SDT>. then ADY = ADT - TR01SDT + 1;
+		else if .<ADT<TR01SDT then ADY = ADT - TR01SDT;
+
+	* _adtm;
+		if cmiss(ADTM,TR01SDTM)=0 then _adtmy = ADTM - TR01SDTM;
+		else if cmiss(ADT,TR01SDT)=0 then _adtmy = input(compress(put(ADT,date9.)||':00:00'),datetime20.) - input(compress(put(TR01SDT,date9.)||':23:59'),datetime20.);
+		else _adtmy = 99999999;
+
+		if _adtmy<=0 and ^missing(TR01SDT) then prefl='Y'; 
+		else if ady=1 and ^missing(TR01SDT) and TR01SDT = ADT then prefl='Y';
+		else if _adtmy>0 and ^missing(TR01SDT) then postfl='Y';
+
+		_adtmy = abs(_adtmy);
+
+	if index(visit,'Uns') or missing(visit) or VISITNUM not in (5 8) then chk_vist = 1;
+	else chk_vist = 0;
+	
+	format ADTM datetime20. ADT date9. ATM time5.;
+run;
+
+proc sort tagsort data=mb_adsl out=base_chg; 
+	by usubjid paramcd descending _avaln localfl postfl descending ady       descending mbseq; 
+run;
+
+data base_chg;
+	length AVISIT BASEC $50 AWRANGE $20 _war $200;
+	set base_chg;
+	by usubjid paramcd descending _avaln localfl postfl descending ady    descending mbseq;
+
+	* Baseline Record Flag;
+	retain BASEC;
+	if first.paramcd and _avaln=1 and prefl='Y' and localfl ne 'Y' then do;
+		ABLFL = 'Y';
+		AVISIT = 'Baseline';
+		BASEC = AVALC;
+	end;
+	else if first.paramcd then do;
+		BASEC = ''; 
+	end;
+
+	if mbblfl ne ablfl then do;
+		_war='Put Aler'||'t_C: ABLFL ne mbblfl.';
+		put _war usubjid= paramcd= mbblfl= ABLFL= ;
+		put _war mbDTC= TR01SDTM= TR01SDT= prefl= postfl= MBSTRESC=;
+	end;
+
+	* Analysis Visit;
+	if postfl='Y'   and (index(visit,'Uns') or missing(visit) or VISITNUM not in (5 8) ) then do; 
+		     if 2<ADY<=43 then AVISIT = 'Day 29'; 
+		else if 43<ADY<=70 then AVISIT = 'Day 57';
+		else if 70<ADY  then AVISIT = 'Day 71 or Beyond'; 
+
+		if missing(visit) and ^missing(avisit) then do;
+		_war='Put Aler'||'t_R: spec needs updat because AVISIT='||strip(avisit)||' while VISIT is missing.';
+		put _war;
+		end;
+	end; 
+	else if postfl='Y' and ady>1 then AVISIT = 'Day'||scan(visit,2,'Day');
+	
+	*Analysis Visit (N);
+	if AVISIT='Baseline' then AVISITN = 1;
+	else if AVISIT='Day 15' then AVISITN = 4;
+	else if AVISIT='Day 29' then AVISITN = 5;
+	else if AVISIT='Day 43' then AVISITN = 7;
+	else if AVISIT='Day 57' then AVISITN = 8;
+	else if AVISIT='Day 71 or Beyond' then AVISITN = 99; 
+	
+	else if ^missing(AVISIT) then do;
+		_war='Put Aler'||'t_R: AVISIT='||strip(avisit)||' while AVISITN is missing.';
+		put _war;
+	end;
+
+	* Analysis Window Valid Relative Range;
+	if AVISIT='Baseline' then AWRANGE = '<=1 Pre-dose'; 
+	else if AVISIT='Day 29' then AWRANGE = 'Day 2 - Day 43'; 
+	else if AVISIT='Day 57' then AWRANGE = 'Day 44 - Day 70';
+	else if AVISIT='Day 71 or Beyond' then AWRANGE = '>= Day 71'; 
+
+	* Analysis Window Target;
+	if AVISIT='Baseline' then AWTARGET = 1;
+	else if AVISIT='Day 15' then AWTARGET = 15;
+	else if AVISIT='Day 29' then AWTARGET = 29; 
+	else if AVISIT='Day 57' then AWTARGET = 57;
+	else if AVISIT='Day 71 or Beyond' then AWTARGET = 71; 
+
+		* Analysis Window Diff from Target;
+		if cmiss(AWTARGET,ADY)=0 then AWTDIFF = abs(ADY - AWTARGET);
+		if cmiss(AWTARGET,ADY)=0 then AWU = 'DAYS';
+
+
+		if postfl='Y' and (index(visit,'Uns') or missing(visit) or VISITNUM not in (5 8)) then do;
+			_uns=1;
+			_awtdiff=awtdiff;
+		end;
+		else if postfl='Y' then do;
+			_uns=0;
+			_awtdiff=0;
+		end;
+		else _awtdiff=99999999;
+run;
+
+* Analysis Flag 01;
+proc sort tagsort data=base_chg out=anl01fl; 
+	by usubjid paramcd avisitn descending postfl descending _avaln localfl _uns _awtdiff descending ady descending _adtmy;
+run;
+
+data admb;
+	set anl01fl;
+	by usubjid paramcd avisitn descending postfl descending _avaln localfl _uns _awtdiff descending ady descending _adtmy;
+
+	if first.avisitn and ^missing(avisitn) and postfl='Y' and _avaln=1 and localfl ne 'Y' then ANL01FL = 'Y';
+	if ABLFL='Y' then ANL01FL='Y';
+
+	drop _: &adslvar.;
+run;
+
+**Generate final dataset by updating certain attributes. Optionally merge common variables & create sequence variable as needed**;
+%TRTA(dsname=&DSETNAME);
+
+data &dsetname.;
+	merge &dsetname. (in=a) adb.adsl (in=b keep = usubjid);
+	by usubjid;
+	if a and b;
+run;
+proc sort data = &dsetname.; 
+	by USUBJID  PARCAT1 PARAMCD  AVISITN  MBDTC ADT ADTM MBSEQ;
+run;
+
+%adam_dataset_update(
+	ds=&DSETNAME,
+	libin=work,
+	libout=output,
+	adsllib=adb,
+	addcomvar=Y,
+	addseq=,
+	dropinfmt=Y,
+	mapspecfile=&ADAM_SPEC,
+	maploc=&ADAM_SPEC_LOC,
+	debug=N
+	);
+ 
+%macro dod;
+**Generate Value Level Metadata values for the ad<xx> dataset**;
+% dod_vlm(        
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&G_PROJECTPATH.&G_TOPLEVEL.\Documents\Specs\,
+	specname=&G_NICKNAME._ADaM_Spec.xlsm,
+	debug=N
+	);
+
+**Generate Enhanced Controlled Terminology for the ad<xx> dataset**;
+% dod_enhcd_ct(            
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&G_PROJECTPATH.&G_TOPLEVEL.\Documents\Specs\,
+	specname=&G_NICKNAME._ADaM_Spec.xlsm,
+	map_ct_nm=,
+	map_ct_loc=,
+	debug=N
+	);
+%mend; 

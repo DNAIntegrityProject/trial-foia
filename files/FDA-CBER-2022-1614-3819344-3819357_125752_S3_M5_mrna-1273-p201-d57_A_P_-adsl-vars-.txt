@@ -1,0 +1,537 @@
+*************************************************************************************************;
+* 
+*           CLIENT:  ModernaTX, Inc.
+*         PROTOCOL:  mRNA-1273-P201
+*
+*          PURPOSE: Create common code for analysis dataset adsl
+*      
+*      INPUT FILES: SDTM domains
+*     OUTPUT FILES: work.final.sas7bdat
+*
+*      USAGE NOTES: 
+*      
+*************************************************************************************************;
+*  Copyright 2020 Pharmaceutical Product Development, Inc.
+*  All Rights Reserved. 
+*************************************************************************************************;
+
+proc sql noprint;
+	select tsval into:dcutdtc from trans.ts where tsparmcd='DCUTDTC';
+quit;
+
+%macro caldy(stdt=,endt=,outdy=);
+	if ^missing(&stdt.) and ^missing(&endt.) then do;
+		if &stdt.>=&endt. then &outdy. = &stdt. - &endt. + 1;
+		else &outdy. = &stdt. - &endt.;
+	end;
+%mend;
+
+proc format;
+	value $trtn
+	'Placebo' = 1
+	'mRNA-1273 50 ug' = 2
+	'mRNA-1273 100 ug' = 3;
+run;
+
+**Merge supplemental data onto parent domain**;
+%revsupp(libin=trans,libout=work,ds=dm,supp=suppdm,outds=dm_all);
+%revsupp(libin=trans,libout=work,ds=ds,supp=suppds,outds=ds_all);
+%revsupp(libin=trans,libout=work,ds=vs,supp=suppvs,outds=vs_all);
+%revsupp(libin=trans,libout=work,ds=is,supp=suppis,outds=is_all);
+%revsupp(libin=trans,libout=work,ds=mb,supp=suppmb,outds=mb_all);
+%revsupp(libin=trans,libout=work,ds=rp,supp=supprp,outds=rp_all);
+%revsupp(libin=trans,libout=work,ds=face,supp=suppface,outds=face_all);
+
+proc sql;
+	create table dddtc as
+	select distinct usubjid,min(dddtc) as min_dddtc
+	from trans.dd where ^missing(dddtc) group by usubjid
+	order by usubjid;
+
+	create table autopsy as
+	select distinct usubjid,ddorres from trans.dd where ddtestcd='AUTOPIND'
+	order by usubjid;
+quit;
+
+proc sort tagsort data=dm_all; by usubjid subjid; run;
+
+data ds_all;
+	set ds_all;
+	_usubjid=usubjid;
+	if enrollyn^='Y' then usubjid=scan(_usubjid,1,'-')||'-'||scan(_usubjid,2,'-')||'-'||scan(_usubjid,3,'-')||
+		'-'||substr(subjid,1,5)||'-'||substr(subjid,6);
+	else usubjid=_usubjid;
+run;
+
+proc sort tagsort data=ds_all; by usubjid subjid dsstdtc; run;
+data ds_sub;
+	set ds_all(where=(enrollyn^='N' and missing(dsscat) and dsdecod in ('INFORMED CONSENT OBTAINED' 'RANDOMIZED')));
+	by usubjid subjid dsstdtc;
+	if last.subjid then output;
+run;
+
+/***************************  vs_all  ***************************/
+proc sort tagsort data=vs_all out=vs_sub; 
+	by usubjid subjid vstestcd vstptref vsdtc;  
+	where not missing(vsorres);
+run;
+data vs_sar1 vs_sar2;
+	set vs_sub;
+	by usubjid subjid vstestcd vstptref vsdtc;
+	
+	if last.vstptref and upcase(vstptref)='DOSE 1' and vstestcd='TEMP' and upcase(vscat)='REACTOGENICITY' then output vs_sar1;
+	if last.vstptref and upcase(vstptref)='DOSE 2' and vstestcd='TEMP' and upcase(vscat)='REACTOGENICITY' then output vs_sar2;
+run;
+/****************************************************************/
+
+/***************************  ex_all  ***************************/
+proc sort tagsort data=trans.ex out=ex_all; by usubjid exstdtc visitdy; run;
+data ex_exstc ex_dose1 ex_dose2;
+	length _war $200;
+	set ex_all;
+	by usubjid exstdtc visitdy;
+
+	if ^missing(exstdtc) and lowcase(extrt)^='placebo' and exdose in (. 0) and exdostxt='' then do;
+		_war = 'Put Aler'||'t_R: SAFFL: spec needs update. USUBJID='||strip(usubjid)||
+				' has EXDOSE='||strip(vvalue(exdose))||'.';
+		put _war;
+	end;
+
+	if last.usubjid and ^missing(exstdtc) then do;
+		_dom_exstc = domain;
+		output ex_exstc;
+	end;
+
+	if last.visitdy and visitdy=1 and ^missing(exstdtc) then do;
+		_dom_exdose1 = domain;
+		output ex_dose1;
+	end;
+
+	if last.visitdy and visitdy=29 and ^missing(exstdtc) then do;
+		_dom_exdose2 = domain;
+		_dose2dtc = exstdtc;
+
+		if not first.visitdy then do;
+			_war = 'Put Aler'||'t_R: DOSE2DT needs udpate because USUBJID='||strip(usubjid)||
+				' in DAY 29 has multiple doese.';
+			put _war;
+		end;
+		output ex_dose2;
+	end;
+run;
+/****************************************************************/
+
+/***************************  face_all  ***************************/
+proc sort tagsort data=face_all out=face_sub; 
+	by usubjid fatptref; 
+	where missing(fastat) and not missing(fastresc);
+run;
+data face_sar1 face_sar2;
+	set face_sub;
+	by usubjid fatptref;
+	
+	if last.fatptref and upcase(fatptref)='DOSE 1' then output face_sar1;
+	if last.fatptref and upcase(fatptref)='DOSE 2' then output face_sar2;
+run;
+/*****************************************************************/
+
+/***************************  is_all_neut_set 1  ***************************/
+data is_all_neut_set1;
+	set is_all;
+	if index(upcase(iscat),'NEUTRALIZING');
+	if (istestcd='MNET' and input(lloq,best.)=160) or (istestcd='MN50' and input(lloq,best.)=318.46) then delete;
+run;
+
+proc sort tagsort data=is_all_neut_set1 out=is_neut_sub; 
+	by usubjid iscat isdtc; 
+	where not missing(isdtc) and ^missing(isorres);
+run;
+
+data is_neut_min is_neut_max;
+	set is_neut_sub;
+	by usubjid iscat isdtc;
+	
+	if first.iscat then output is_neut_min;
+	if last.iscat then output is_neut_max;
+run;
+
+/*****************************************************************/
+
+/***************************  is_all  ***************************/
+proc sort tagsort data=is_all out=is_sub; 
+	by usubjid iscat isdtc; 
+	where not missing(isdtc) and ^missing(isorres);
+run;
+data is_min is_max;
+	set is_sub;
+	by usubjid iscat isdtc;
+	
+	if first.iscat then output is_min;
+	if last.iscat then output is_max;
+run;
+/*****************************************************************/
+
+/***************************  rp_all  ***************************/
+proc sort tagsort data=rp_all out=rp_sub; 
+	by usubjid rptestcd rpdtc; 
+	where not missing(rpdtc);
+run;
+data rp_sub;
+	set rp_sub;
+	by usubjid rptestcd rpdtc;
+	if last.rptestcd then output;
+run;
+/*****************************************************************/
+
+/***************************  mb_all  ***************************/
+proc sort tagsort data=mb_all out=mb_cov2;
+	by usubjid mbdtc;
+	where mbtestcd='SARSCOV2' and localfl ne 'Y';
+run;
+
+data mb_cov2;
+	merge mb_cov2(in=a) dm_all(keep=usubjid rfxstdtc);
+	by usubjid;
+	if a;
+	if substr(mbdtc,1,10)<=substr(rfxstdtc,1,10);
+run;
+
+data mb_cov2;
+	set mb_cov2;
+	by usubjid;
+	if last.usubjid;
+run;
+
+proc sort tagsort data=mb_all out=cov2_infection nodupkey;
+	by usubjid;
+	where mbtestcd='SARSCOV2' and mbstresc in ('DETECTED', 'POSITIVE');
+run;
+
+
+proc sort tagsort data=trans.ae out=aecov nodupkey;
+	by usubjid subjid;
+	where index(aedecod, 'COVID-19') or aedecod='SARS-CoV-2 test positive';
+run;
+
+/*****************************************************************/
+
+
+**INSERT CODE TO GENERATE DATASET**;
+data all_merge_subjid;
+	merge dm_all(in=dm rename=(protver=_protver sentl=_sentl prevscr=_prevscr))
+		  ds_all(where=(dsdecod='RANDOMIZED' and ^missing(_randdtc) /*and ^missing(dsrefid)*/)
+				 rename=(domain=_dom_rand dsstdtc=_randdtc) 
+				 keep=usubjid subjid dsdecod dsstdtc dsrefid domain)
+		  ds_sub(/*where=(enrollyn='Y')*/ rename=(domain=_dom_enrol) keep=usubjid subjid enrollyn domain)
+		  ds_all(where=(dsscat='SCREEN FAILURE')rename=(domain=_dom_scrn) keep=usubjid subjid dsscat domain)
+		  ds_all(where=(_eos_dsscat='END OF STUDY')
+				 rename=(domain=_dom_eos dsstdtc=_eos_dsstdtc dsscat=_eos_dsscat dsdecod=_eos_dsdecod dsterm=_eos_dsterm) 
+				 keep=usubjid subjid dsscat dsdecod dsterm dsstdtc domain)
+		  ds_all(where=(_eot_dsscat='STUDY TREATMENT' and _eot_dsdecod ne 'COMPLETED')
+				 rename=(domain=_dom_eot dsstdtc=_eot_dsstdtc dsscat=_eot_dsscat dsdecod=_eot_dsdecod dsterm=_eot_dsterm) 
+				 keep=usubjid subjid dsscat dsdecod dsterm dsstdtc domain)
+		  vs_all(where=(_vstestcd_hei='HEIGHT' and _vsblfl_hei='Y' and _unit_cm='cm')
+				 rename=(domain=_dom_hei vstestcd=_vstestcd_hei vsblfl=_vsblfl_hei vsdtc=_vsdtc_hei vstpt=_vstpt_hei vsstresn=_vsstresn_hei vsstresu=_unit_cm)
+				 keep=usubjid subjid domain vstestcd vsblfl vsdtc vstpt vsstresn vsstresu)
+		  vs_all(where=(_vstestcd_wei='WEIGHT' and _vsblfl_wei='Y' and _unit_kg='kg')
+				 rename=(domain=_dom_wei vstestcd=_vstestcd_wei vsblfl=_vsblfl_wei vsdtc=_vsdtc_wei vstpt=_vstpt_wei vsstresn=_vsstresn_wei vsstresu=_unit_kg)
+				 keep=usubjid subjid domain vstestcd vsblfl vsdtc vstpt vsstresn vsstresu)	  
+		  vs_sar1(rename=(domain=_dom_vssar1 vsdtc=_vsdtc_sar1) keep=usubjid subjid domain vsdtc)
+		  vs_sar2(rename=(domain=_dom_vssar2 vsdtc=_vsdtc_sar2) keep=usubjid subjid domain vsdtc)
+		  aecov (keep=usubjid subjid aedecod)
+	;by usubjid subjid;
+	if dm;
+run;
+
+data all_merge;
+	merge all_merge_subjid(in=a)
+		  rp_sub(where=(_rptestcd_chil='CHILDPOT') 
+				rename=(domain=_dom_chil rptestcd=_rptestcd_chil) 
+				keep=usubjid domain rptestcd rporres cbrsn)
+		  dddtc(keep=usubjid min_dddtc)
+		  autopsy(keep=usubjid ddorres)
+		  ex_exstc(keep=usubjid _dom_exstc)
+		  ex_dose1(keep=usubjid _dom_exdose1)
+		  ex_dose2(keep=usubjid _dom_exdose2 _dose2dtc)
+		  face_sar1(rename=(domain=_dom_face1 fadtc=_fadtc_sar1) keep=usubjid  domain fadtc)
+		  face_sar2(rename=(domain=_dom_face2 fadtc=_fadtc_sar2) keep=usubjid  domain fadtc)
+		  mb_cov2(rename=(domain=_dom_cov2 mbdtc=_mbdtc mbstresc=_mbstresc) keep=usubjid domain mbdtc mbstresc)
+		  cov2_infection(rename=(domain=_mb_infection) keep=usubjid domain)
+		  is_min(where=(index(upcase(_iscat_bind_min),'BINDING')) 
+				rename=(domain=_dom_bind_min isdtc=_isdtc_bind_min iscat=_iscat_bind_min) keep=usubjid domain isdtc iscat)
+		  is_max(where=(index(upcase(_iscat_bind_max),'BINDING')) 
+				rename=(domain=_dom_bind_max isdtc=_isdtc_bind_max iscat=_iscat_bind_max) keep=usubjid domain isdtc iscat)
+		  is_min(where=(index(upcase(_iscat_neu_min),'NEUTRALIZING')) 
+				rename=(domain=_dom_neu_min isdtc=_isdtc_neu_min iscat=_iscat_neu_min) keep=usubjid domain isdtc iscat)
+		  is_max(where=(index(upcase(_iscat_neu_max),'NEUTRALIZING')) 
+				rename=(domain=_dom_neu_max isdtc=_isdtc_neu_max iscat=_iscat_neu_max) keep=usubjid domain isdtc iscat)
+		  is_neut_min(where=(index(upcase(_iscat_neu_min_set1),'NEUTRALIZING')) 
+				rename=(domain=_dom_neu_min_set1 isdtc=_isdtc_neu_min_set1 iscat=_iscat_neu_min_set1) keep=usubjid domain isdtc iscat)
+		  is_neut_max(where=(index(upcase(_iscat_neu_max_set1),'NEUTRALIZING')) 
+				rename=(domain=_dom_neu_max_set1 isdtc=_isdtc_neu_max_set1 iscat=_iscat_neu_max_set1) keep=usubjid domain isdtc iscat)
+
+	;by usubjid;
+	if a;
+run;
+
+data assign;
+	length RACESPY $200 CHILDBP $3 PROTVER TRT01P $25 RANDNUM COV19BL $20 SENTLFL $3 PREVSCR $1;
+	set all_merge;
+
+	* Childbearing Potential;
+		CHILDBP = rporres;
+		CBNRS = CBRSN;
+	* Protocol Version;
+		PROTVER = _protver;
+	* Sentinel Participant;
+		SENTLFL = _sentl;
+		if missing(SENTLFL) then SENTLFL = 'N';
+	* Was this participant screened previously;
+		PREVSCR = _prevscr;
+	* Race Specify;
+		if cmiss(raceoth,mulrace)<2 then RACESPY = catx(' ',raceoth,mulrace);
+	* Randomization Number;
+		RANDNUM = DSREFID;
+	* Baseline COVID Infection;
+		if _mbstresc in ('NOTDETECTED', 'NOT DETECTED') then COV19BL = 'Not Detected';
+		else if _mbstresc='DETECTED' then COV19BL = 'Detected';
+		else if ^missing(_randdtc) then do;
+			_war='Put Aler'||'t_I: COV19BL has no baseline result.';
+			put _war SUBJID= _randdtc= rfxstdtc= ;
+			put _War _mbstresc= _mbdtc= _dom_cov2=;
+		end;
+	* COVID Infection Flag;
+		if ^missing(_mb_infection) or aedecod ne '' then COV19FL = 'Y';
+		else COV19FL = 'N';
+
+	* Age Cohort;
+		if cohort=:'COHORT 1' then do;
+			AGEGR1 = '>=18 and <55 Years';
+			AGEGR1N = 1;
+		end;
+		else if cohort=:'COHORT 2' then do;
+			AGEGR1 = '>=55 Years';
+			AGEGR1N = 2;
+		end;
+
+	* Age Group 2;
+		if cohort=:'COHORT 1' then do;
+			if age>=18 and age<=22 then do; AGEGR2 = '>=18 and <=22 Years'; AGEGR2N = 1; end;
+			if age>=23 and age<=25 then do; AGEGR2 = '>=23 and <=25 Years'; AGEGR2N = 2; end;
+			if age>25 and age<55 then do; AGEGR2 = '>25 and <55 Years'; AGEGR2N = 3; end;
+		end;
+		else if cohort=:'COHORT 2' then do;
+			AGEGR2 = '>=55 Years';
+			AGEGR2N = 4;
+		end;
+
+	* Planned Treatment for Period 01;
+		if index(arm,'Placebo') or index(arm,'RNA') then TRT01P = arm;
+		TRT01PN = input(put(TRT01P,$trtn.),best.);
+
+	* Programming note in spec;
+		if ^missing(_dom_enrol) and (missing(_dom_scrn) or ^missing(_dom_exdose1)) then output;
+run;
+
+data datev;
+	set assign;
+
+	array ori(3) $ _fadtc_sar2 _vsdtc_sar2 _dose2dtc;
+
+	* Data Cutoff Date;
+		CUTOFFDT = input("&dcutdtc.",yymmdd10.);
+	* Date of Informed Consent;
+		%ISO2SAS(isodate=rficdtc, datec=_rficdtc, daten=RFICDT);
+	* Date of Randomization;
+		%ISO2SAS(isodate=_randdtc, datec=_randdt_c, daten=RANDDT);
+	* Date of Death;
+		%ISO2SAS(isodate=min_dddtc, datec=_dthdt_c, daten=DTHDT);
+
+	* Date/Datetime of First Exposure in Period 01;
+		%ISO2SAS(isodate=rfxstdtc, datec=_rfxstdtc, daten=TR01SDT, timec=_tr01stm);
+		if ^missing(_tr01stm) and ^missing(TR01SDT) then 
+			TR01SDTM = input(compress(put(TR01SDT,date9.)||':'||_tr01stm),datetime20.);
+
+	* Date/Datetime of Last Exposure in Period 01;
+		%ISO2SAS(isodate=rfxendtc, datec=_rfxendtc, daten=TR01EDT, timec=_tr01etm);
+		if ^missing(_tr01etm) and ^missing(TR01EDT) then 
+			TR01EDTM = input(compress(put(TR01EDT,date9.)||':'||_tr01etm),datetime20.);
+
+	* Date of Dose 2;
+		%ISO2SAS(isodate=_dose2dtc, datec=_dose2dt_c, daten=DOSE2DT, timec=_dose2tm);
+		if ^missing(_dose2tm) and ^missing(DOSE2DT) then 
+			DOS2DTM = input(compress(put(DOSE2DT,date9.)||':'||_dose2tm),datetime20.);
+
+	* End of Study Date;
+		%ISO2SAS(isodate=_eos_dsstdtc, datec=_eosdtc, daten=EOSDT);
+		%CALDY(stdt=EOSDT,endt=TR01SDT,outdy=EOSDY);
+
+	* End of Treatment Status;
+		%ISO2SAS(isodate=_eot_dsstdtc, datec=_eotdtc, daten=EOTDT);
+			if ^missing(DOSE2DT) then EOTDT = DOSE2DT;
+		%CALDY(stdt=EOTDT,endt=TR01SDT,outdy=EOTDY);
+
+	TRTSDTM = TR01SDTM;
+	TRTEDTM = TR01EDTM;
+
+	format TR01SDTM TR01EDTM DOS2DTM TRTSDTM TRTEDTM datetime20.;
+run;
+
+data flag;
+	length FASBABRS FASNABRS $200;
+	set datev;
+
+	* Randomized Population Flag;
+		if ^missing(_dom_rand) then RANDFL = 'Y'; else RANDFL = 'N';
+	* Safety Population Flag;
+		if ^missing(_dom_exstc) and RANDFL='Y' then SAFFL = 'Y'; else SAFFL = 'N';
+	* Vaccination 1 Flag;
+		if ^missing(_dom_exdose1) then DOSE1FL= 'Y'; else DOSE1FL = 'N';
+	* Vaccination 2 Flag;
+		if ^missing(_dom_exdose2) then DOSE2FL= 'Y'; else DOSE2FL = 'N';
+
+	* Completer Study Population Flag;
+		if ^missing(_dom_eos) and _eos_dsdecod='COMPLETED' then COMPLFL = 'Y';
+		else if ^missing(_dom_eos) then COMPLFL = 'N';
+		else COMPLFL = '';
+
+	* Completer Treatment Population Flag;
+		if ^missing(DOSE2DT) then _eotfl = 'Y';
+		else if ^missing(_dom_eot) then _eotfl = 'N';
+		else _eotfl = '';
+
+	* First Solicited Safety Population Flag: based on CE;
+		if SAFFL='Y' and ((^missing(_dom_face1) and _fadtc_sar1>:rfstdtc) or 
+			(^missing(_dom_vssar1) and _vsdtc_sar1>:rfstdtc)) then SAR1FL = 'Y'; else SAR1FL = 'N';
+
+		if SAFFL='Y' and (^missing(_dom_face1) or ^missing(_dom_vssar1)) then _SAR1FL = 'Y'; else _SAR1FL = 'N';
+			if SAR1FL ne _SAR1FL then do;
+				_war='Put Aler'||'t_R: SAR1FL: '||strip(USUBJID);
+				put _war SAR1FL= _SAR1FL= _fadtc_sar1= _vsdtc_sar1= rfstdtc=;
+			end;
+	* Second Solicited Safety Population Flag: based on CE;
+		if SAFFL='Y' and DOSE2FL='Y' and 
+			((^missing(_dom_face2) and _fadtc_sar2>:_dose2dtc) or 
+			(^missing(_dom_vssar2) and _vsdtc_sar2>:_dose2dtc)) then SAR2FL = 'Y'; else SAR2FL = 'N';
+
+		if SAFFL='Y' and DOSE2FL='Y' and
+			(^missing(_dom_face2) or ^missing(_dom_vssar2)) then _SAR2FL = 'Y'; else _SAR2FL = 'N';
+			if SAR2FL ne _SAR2FL then do;
+				_war='Put Aler'||'t_R: SAR2FL: '||strip(USUBJID);
+				put _war SAR2FL= _SAR2FL= _fadtc_sar2= _vsdtc_sar2= _dose2dtc=;
+			end;
+	* Solicited Safety Population Flag;
+		if SAR1FL='Y' or SAR2FL='Y' then SARAFL = 'Y'; else SARAFL = 'N';
+
+
+	* Full Analysis Set bAb Population Flag - Binding Antibodies;
+		if SAFFL='Y' and substr(_isdtc_bind_min,1,10)<=substr(rfxstdtc,1,10) and ^missing(_isdtc_bind_min) and 
+			substr(_isdtc_bind_max,1,10)>substr(rfxstdtc,1,10) and ^missing(_isdtc_bind_max) then FASBABFL = 'Y';
+		else FASBABFL = 'N';
+
+	* Full Analysis Set nAb Population Flag - Neutralizing Antibodies;
+		if SAFFL='Y' and  substr(_isdtc_neu_min_set1,1,10)<=substr(rfxstdtc,1,10)and ^missing(_isdtc_neu_min_set1) and 
+			substr(_isdtc_neu_max_set1,1,10)>substr(rfxstdtc,1,10) and ^missing(_isdtc_neu_max_set1) then FASNABFL = 'Y';
+		else FASNABFL = 'N';
+
+	* Full Analysis Set nAb Population Flag - Neutralizing Antibodies Sensitivity;
+		if SAFFL='Y' and  substr(_isdtc_neu_min,1,10)<=substr(rfxstdtc,1,10)and ^missing(_isdtc_neu_min) and 
+			substr(_isdtc_neu_max,1,10)>substr(rfxstdtc,1,10) and ^missing(_isdtc_neu_max) then FASNA2FL = 'Y';
+		else FASNA2FL = 'N';
+
+	* Reason for BAB Full Analysis Set Exc - Binding;
+		if RANDFL='Y' and SAFFL='N' then FASBABRS = 'Did not receive any study vaccination';
+		else if RANDFL='Y' and SAFFL='Y' and FASBABFL='N' then FASBABRS = 'There were no immunogenicity results at baseline and at least one post-vaccination';
+
+	* Reason for NAB Full Analysis Set Exc - Neutralizing;
+		if RANDFL='Y' and SAFFL='N' then FASNABRS = 'Did not receive any study vaccination';
+		else if RANDFL='Y' and SAFFL='Y' and FASNABFL='N' then FASNABRS = 'There were no immunogenicity results at baseline and at least one post-vaccination';
+run;
+
+data final;
+	length TRT01A $25 DCSREAS DCTREAS $100 DCSREASP SAFEREAS SAR1ERS SAR2ERS _war $200 DTHAUTOP $8 EOTSTT EOSSTT $20;
+	set flag;
+
+	* Was autopsy performed;
+		DTHAUTOP = ddorres;
+
+	* Actual Treatment for Period 01;
+		if SAFFL='Y' then TRT01A = actarm;
+		TRT01AN = input(put(TRT01A,$trtn.),best.);
+
+	* End of Study Status;
+		if COMPLFL='Y' then EOSSTT  = 'COMPLETED';
+		else if COMPLFL='N' then EOSSTT = 'DISCONTINUED';
+		else EOSSTT = 'ONGOING';
+
+		* Reason for Discontinuation from Study;
+		if COMPLFL='N' and _eos_dsdecod=upcase(_eos_dsterm) then DCSREAS = propcase(_eos_dsterm);
+		else if COMPLFL='N' then do;
+			if _eos_dsdecod in ('PHYSICIAN DESICION' 'PROTOCOL DEVIATION' 'OTHER') then DCSREAS = propcase(_eos_dsdecod);
+			else if _eos_dsdecod='ADVERSE EVENT' then DCSREAS = 'Adverse Event (Other)';
+			else if _eos_dsdecod='AE COVID' then DCSREAS = 'Adverse Event (COVID-19 Infection)';
+			else if _eos_dsdecod='WITHDRAWAL BY SUBJECT (OTHER)' then DCSREAS = 'Withdrawal of Consent (Other)';
+			else if _eos_dsdecod in ('WITHDRAWAL BY SUBJECT (COVID-19 NON-INFECTION RELATED)' 'WITHDRAWAL COVID') then DCSREAS = 'Withdrawal of Consent (COVID-19 Non-Infection Related)';
+			else if index(_eos_dsdecod,'ADVERSE') or index(_eos_dsdecod,'WITHDRAWAL') or index(_eos_dsdecod,'PROTOCOL') then do;
+				_war='Put Aler'||'t_R: DCTREAS/DCSREAS needs udpate. ';
+				put _war subjid= _eos_dsdecod=;
+			end;
+						
+			if _eos_dsdecod^='AE COVID' then DCSREASP = _eos_dsterm;
+		end;
+		if upcase(DCSREAS)='LOST TO FOLLOW-UP' then DCSREAS = 'Lost to Follow-Up';
+
+	* End of Treatment Status;
+		if _eotfl='Y' then EOTSTT  = 'COMPLETED';
+		else if _eotfl='N' then EOTSTT = 'DISCONTINUED';
+		else EOTSTT = 'ONGOING';
+
+		* Reason for Discontinuation from Study;
+		if /*_eotfl='N' and*/ _eot_dsdecod=upcase(_eot_dsterm) then DCTREAS = propcase(_eot_dsterm);
+		else /*if _eotfl='N' then*/ do;
+			if _eot_dsdecod in ( 'PHYSICIAN DESICION' 'PROTOCOL DEVIATION' 'OTHER' 'LOST TO FOLLOW-UP') then DCTREAS = propcase(_eot_dsdecod);
+			else if _eot_dsdecod='ADVERSE EVENT' then DCTREAS = 'Adverse Event (Other)';
+			else if _eot_dsdecod='AE COVID' then DCTREAS = 'Adverse Event (COVID-19 Infection)';
+			else if _eot_dsdecod='WITHDRAWAL BY SUBJECT (OTHER)' then DCTREAS = 'Withdrawal of Consent (Other)';
+			else if _eot_dsdecod in ('WITHDRAWAL BY SUBJECT (COVID-19 NON-INFECTION RELATED)' 'WITHDRAWAL COVID') then DCTREAS = 'Withdrawal of Consent (COVID-19 Non-Infection Related)';
+			if _eot_dsdecod^='AE COVID' then DCTREASP = _eot_dsterm;
+		end;
+		if upcase(DCTREAS)='LOST TO FOLLOW-UP' then DCTREAS = 'Lost to Follow-Up';
+		if _eotfl='Y' and DCTREAS ne '' then do;
+			_war='Put Aler'||'t_R: EOT page needs check for '||strip(subjid)||'.';
+			put _war;
+		end;
+
+
+	* Baseline Height (cm);
+		if ^missing(_dom_hei) and _vsdtc_hei<:rfstdtc then HEIGHTBL = _vsstresn_hei;
+		else if ^missing(_dom_hei) and _vsdtc_hei=rfstdtc and _vstpt_hei='PRE-DOSE' then HEIGHTBL = _vsstresn_hei;
+		else if ^missing(_dom_hei) then do;
+			_war='Put Aler'||'t_R: HEIGHTBL needs check for '||strip(usubjid)||'.';
+			put _war;
+		end;
+		
+	* Baseline Weight (kg);
+		if ^missing(_dom_wei) and _vsdtc_wei<:rfstdtc then WEIGHTBL = _vsstresn_wei;
+		else if ^missing(_dom_wei) and _vsdtc_wei=rfstdtc and _vstpt_wei='PRE-DOSE' then WEIGHTBL = _vsstresn_wei;
+		else if ^missing(_dom_wei) then do;
+			_war='Put Aler'||'t_R: WEIGHTBL needs check for '||strip(usubjid)||'.';
+			put _war;
+		end;
+
+	* Baseline BMI (kg/m2);
+		if cmiss(HEIGHTBL,WEIGHTBL)=0 then BMIBL = WEIGHTBL/((HEIGHTBL/100)*(HEIGHTBL/100));
+
+	* Reason for Safety Set Exclusion;
+		if RANDFL='Y' and SAFFL='N' then SAFEREAS = 'Did not receive any vaccination';
+
+	* Reason for 1st Solicited Safety Set Exc;
+		if RANDFL='Y' and SAFFL='N' then SAR1ERS = 'Did not receive any study vaccination';
+		else if RANDFL='Y' and SAFFL='Y' and SAR1FL='N' then SAR1ERS = 'Did not contribute any solicited AR data for Vaccination #1';
+
+	* Reason for 2nd Solicited Safety Set Exc;
+		if RANDFL='Y' and SAFFL='N' then SAR2ERS = 'Did not receive any study vaccination';
+		else if RANDFL='Y' and SAFFL='Y' and DOSE2FL='N' then SAR2ERS = 'Did not receive Vaccination #2';
+		else if RANDFL='Y' and SAFFL='Y' and DOSE2FL='Y' and SAR2FL='N' then SAR2ERS = 'Did not contribute any solicited AR data for Vaccination #2';
+run;
+

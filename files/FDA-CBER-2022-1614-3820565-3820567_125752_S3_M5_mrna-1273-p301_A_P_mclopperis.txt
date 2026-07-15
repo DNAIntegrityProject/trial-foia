@@ -1,0 +1,126 @@
+*************************************************************************************************;
+*           CLIENT: ModernaTX, Inc.
+*         PROTOCOL: mRNA-1273-P301
+*          PURPOSE: Create Inferential Statistical Analysis Macro      
+*      INPUT FILES: ADaM datasets
+*     OUTPUT FILES: *.rtf
+*      USAGE NOTES: 
+*************************************************************************************************;
+*  Copyright 2020 Pharmaceutical Product Development, Inc.
+*  All Rights Reserved.
+*************************************************************************************************;
+
+%macro clopper2 (lib=, datain=, trt=, cohort=, grvar=, subset=, crit=, dataout=);
+  data &datain.;
+  set &lib..&datain.;
+  where &subset.;
+  run;
+
+/* run only if obs gt 0*/
+     proc sql noprint;
+      select count(*) 
+        into :obs_count
+          from &datain.;
+    quit;
+
+    %if &obs_count = 0 %then
+      %do;
+	  %put No observation;
+	%end;
+
+    %if &obs_count gt 0 %then
+      %do;
+
+  data temp;
+  set &datain.;
+  length trt $20;
+  trt=&trt.;
+  output;
+  if index(&trt., 'mRNA-1273')>0 then trt='mRNA-1273 Total';
+  output;
+  run;
+
+  data temp1;
+  set temp;
+  length cohort $20;
+  cohort=&cohort.;
+  output;
+  if &cohort.^='' then cohort='Overall';
+  output;
+  if &cohort.='' then cohort='Missing';
+  output;
+  run;
+
+  proc sort data=temp1 out=n1 nodupkey;
+  by subjid trt cohort avisit paramcd &grvar.;
+  where not missing(AVAL) and not missing(BASE);
+  run;
+
+  proc sort data=temp1 out=any nodupkey;
+  by subjid trt cohort avisit paramcd &grvar.;
+  where &CRIT. ='Y' and not missing(AVAL) and not missing(BASE);
+  run;
+
+%if &grvar.= %then %do;
+  proc freq data=n1 noprint;
+  table trt*cohort*paramcd*avisit/norow nocol nopercent nocum out=denom;
+  run;
+
+  proc freq data=any;
+  table trt*cohort*paramcd*avisit/norow nocol nopercent nocum out=num;
+  run;
+%end;
+%if &grvar.^= %then %do;
+ proc freq data=n1 noprint;
+  table trt*cohort*paramcd*avisit*&grvar./norow nocol nopercent nocum out=denom;
+  run;
+
+  proc freq data=any;
+  table trt*cohort*paramcd*avisit*&grvar./norow nocol nopercent nocum out=num;
+  run;
+%end;
+
+  data sc;
+  merge denom(rename=count=denom drop=percent) num(rename=count=n drop=percent);
+  by trt cohort paramcd avisit &grvar.;
+  run;
+
+  data sc;
+  set sc;
+  if n=. then n=0;
+  if avisit='Baseline' then delete;
+  run;
+
+  data clopper;
+  set sc;
+  n1=denom-n;
+  rename n=Y n1=N;
+  run;
+
+  proc transpose data=clopper out=clopper_sc;
+  by trt cohort paramcd avisit &grvar.;
+  var y n;
+  run;
+
+  proc freq data=clopper_sc;
+  ods output binomialcls=ci;
+  by trt cohort paramcd avisit &grvar. ;
+  tables _name_/ nocum norow binomial (LEVEL="Y" ALL);
+  weight col1 / zeros;
+  run;
+
+  data &dataout.;
+  set ci;
+  lowercl=lowercl*100;
+  uppercl=uppercl*100;
+  where type='Clopper-Pearson (Exact)';
+  drop table proportion type;
+  run;
+  %end;
+%mend clopper2;
+
+
+
+
+
+

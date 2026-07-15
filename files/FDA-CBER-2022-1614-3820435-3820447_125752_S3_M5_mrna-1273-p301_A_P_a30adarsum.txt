@@ -1,0 +1,577 @@
+*************************************************************************************************;
+* 
+*           CLIENT:  ModernaTX, Inc.
+*         PROTOCOL:  mRNA-1273-P301
+*
+*          PURPOSE: Create analysis dataset adarsum
+*      
+*      INPUT FILES: SDTM domains
+*     OUTPUT FILES: ADARSUM.sas7bdat
+*
+*      USAGE NOTES: 
+*      
+*************************************************************************************************;
+*  Copyright 2020 Pharmaceutical Product Development, Inc.
+*  All Rights Reserved. 
+*************************************************************************************************;
+
+options noquotelenmax;
+%include "madam.sas";
+
+**Assign global macro variable DSETNAME to reflect the name of the final ADaM dataset**;
+%global DSETNAME;
+%let dsetname = adarsum;
+
+**INSERT CODE TO GENERATE DATASET**;
+
+	%if %lowcase(&DSETNAME.)=adarsum %then %do;
+		%let inadar=adar;
+		%let inadarp7d=adarp7d;
+	%end; %else %do;
+		%let inadar=adare;
+		%let inadarp7d=adarp7de;
+	%end;
+
+proc format;
+    value $param 
+    'LYMPHDUR'='Number of Days for Underarm Gland Swelling or Tenderness'
+    'PAINDUR'='Number of Days for Pain'
+    'ERYTHDUR'='Number of Days for Erythema '
+    'SWELLDUR'='Number of Days for Swelling'
+    'HEADADUR'='Number of Days for Headache'
+    'FATIGDUR'='Number of Days for Fatigue'
+    'MYALGDUR'='Number of Days for Myalgia'
+    'ARTHRDUR'='Number of Days for Arthralgia'
+    'NAUSEDUR'='Number of Days for Nausea'
+    'CHILLDUR'='Number of Days for Chills'
+    'FEVERDUR'='Number of Days for Fever'
+    'ANYDUR'='Number of Days for Any Solicited AR'
+    'LOCDUR'='Number of Days for Local Solicited AR'
+    'SYSDUR'='Number of Days for Systemic Solicited AR'
+    'WLYMPH'='Worst Analysis Toxicity Grade for Underarm Gland Swelling or Tenderness between Day 1 and Day 7'
+    'WPAIN'='Worst Analysis Toxicity Grade for Pain between Day 1 and Day 7'
+    'WERYTH'='Worst Analysis Toxicity Grade for Erythema between Day 1 and Day 7'
+    'WSWELL'='Worst Analysis Toxicity Grade for Swelling between Day 1 and Day 7'
+    'WHEAD'='Worst Analysis Toxicity Grade for Headache between Day 1 and Day 7'
+    'WFATIGUE'='Worst Analysis Toxicity Grade for Fatigue between Day 1 and Day 7'
+    'WMYALGIA'='Worst Analysis Toxicity Grade for Myalgia between Day 1 and Day 7'
+    'WARTHR'='Worst Analysis Toxicity Grade for Arthralgia between Day 1 and Day 7'
+    'WNAUSEA'='Worst Analysis Toxicity Grade for Nausea between Day 1 and Day 7'
+    'WCHILLS'='Worst Analysis Toxicity Grade for Chills between Day 1 and Day 7'
+    'WFEVER'='Worst Analysis Toxicity Grade for Fever between Day 1 and Day 7'
+    'WSAR'='Worst Analysis Toxicity Grade for Any Solicited AR between Day 1 and Day 7'
+    'WSLAR'='Worst Analysis Toxicity Grade for Any Solicited Local AR between Day 1 and Day 7'
+    'WSSAR'='Worst Analysis Toxicity Grade for Any Solicited Systemic AR between Day 1 and Day 7'
+	;
+run;
+
+data &inadar.;
+    set adb.&inadar.(rename=(paramcd=_paramcd));
+run;
+
+
+proc sort tagsort data=trans.faae out=trans_faae; 
+	by usubjid; 
+	where FACAT='REACTOGENICITY' and not (
+		  %if %lowcase(&DSETNAME.)=adarsum %then %do; missing(FATPTREF) %end;
+		  %else %do; FAEVAL^='STUDY SUBJECT' or (index(upcase(FAOBJ),'RECEIVE MEDICAL ATTENTION') and index(upcase(FATEST),'OCCURRENCE')) %end;
+		  or (FAOBJ in ('Erythema','Swelling') and index(upcase(FATEST),'OCCURRENCE')));
+run;
+data faae;
+    merge trans_faae(in=a) adb.adsl(in=b keep=usubjid);
+	by usubjid;
+	if a and b;
+run;
+
+
+proc sort tagsort data=trans.vs out=trans_vs;
+	by usubjid subjid; 
+	where VSCAT='REACTOGENICITY' and VSTPTNUM>7 
+		  %if %lowcase(&DSETNAME.)=adarsum %then %do; and ^missing(VSTPTREF) %end;; 
+run;
+data vs;
+    merge trans_vs(in=a) adb.adsl(in=b keep=usubjid subjid);
+	by usubjid subjid;
+	if a and b;
+run;
+
+%macro devdur(paramcd=,ds1=,ds2=,ds3=,tp1=,tp2=,tp3=,cond1=,cond2=,cond3=,sub_jid=SUBJID);
+data dev1_&paramcd.;
+    length PARAMCD $8;
+    set &ds1.;
+	PARAMCD="&paramcd.";
+	timepoint1=&tp1.;
+	if &cond1.;
+	keep USUBJID &sub_jid. ATPTREF PARAMCD timepoint1;
+run;
+
+%if &paramcd. ne FEVERDUR %then %do;
+data dev2_&paramcd.;
+    length PARAMCD $8 ATPTREF $50;
+    set &ds2.;
+	PARAMCD="&paramcd.";
+	timepoint2=&tp2.;
+	%if &ds2 eq FAAE %then %do;
+	if index(FATPTREF,'1') then ATPTREF='Vaccination 1';
+	else if index(FATPTREF,'2') then ATPTREF='Vaccination 2';
+	%end;
+	%if &ds2 eq VS %then %do;
+	if index(VSTPTREF,'1') then ATPTREF='Vaccination 1';
+	else if index(VSTPTREF,'2') then ATPTREF='Vaccination 2';
+	%end;
+	if &cond2.;
+    keep USUBJID &sub_jid. ATPTREF PARAMCD timepoint2;
+run;
+%end;
+
+%else %do;
+data dev2_&paramcd._1;
+    length PARAMCD $8 ATPTREF $50 timepoint2 $200;
+    set &ds2.;
+	PARAMCD="&paramcd.";
+	timepoint2=&tp2.;
+	if index(VSTPTREF,'1') then ATPTREF='Vaccination 1';
+	else if index(VSTPTREF,'2') then ATPTREF='Vaccination 2';
+	if &cond2.;
+    keep USUBJID &sub_jid. ATPTREF PARAMCD timepoint2;
+run;
+
+data dev2_&paramcd._2;
+    length PARAMCD $8 ATPTREF $50 timepoint2 $200;
+    set &ds3.;
+	PARAMCD="&paramcd.";
+	timepoint2=&tp3.;
+	if index(FATPTREF,'1') then ATPTREF='Vaccination 1';
+	else if index(FATPTREF,'2') then ATPTREF='Vaccination 2';
+	&cond3.;
+    keep USUBJID ATPTREF PARAMCD timepoint2;
+run;
+
+data dev2_&paramcd.;
+    set dev2_&paramcd._1 dev2_&paramcd._2;
+run;
+%end;
+
+proc sort data=dev1_&paramcd. out=chk1_&paramcd. tagsort nodupkey; by USUBJID &sub_jid. ATPTREF PARAMCD; run;
+proc sort data=dev2_&paramcd. out=chk2_&paramcd. tagsort nodupkey; by USUBJID &sub_jid. ATPTREF PARAMCD; run;
+
+data _null_;
+    merge chk1_&paramcd.(in=a) chk2_&paramcd.(in=b);
+	by USUBJID &sub_jid. ATPTREF PARAMCD;
+	if not a and b then do;
+	    put "ALERT_C: no days from &ds1 but from &ds2" USUBJID= ATPTREF= PARAMCD=;
+	end;
+run;
+%mend devdur;
+
+***LYMPHDUR***;
+	%devdur(paramcd=LYMPHDUR,ds1=&inadar.,ds2=FAAE,tp1=ATPTGR1,tp2=FATPT,sub_jid=
+	,cond1=%str(_paramcd='LYMPH' and ATOXGRN>0),cond2=%str(FAOBJ='Underarm Gland Swelling or Tenderness' and upcase(FASTRESC) not in ('NONE','')));
+***PAINDUR***;
+	%devdur(paramcd=PAINDUR,ds1=&inadar.,ds2=FAAE,tp1=ATPTGR1,tp2=FATPT,sub_jid=
+	,cond1=%str(_paramcd='PAIN' and ATOXGRN>0),cond2=%str(FAOBJ='Pain' and upcase(FASTRESC) not in ('NONE','')));
+***ERYTHDUR***;
+	%if %lowcase(&DSETNAME.)=adarsum %then %do;
+	%devdur(paramcd=ERYTHDUR,ds1=&inadar.,ds2=FAAE,tp1=ATPTGR1,tp2=FATPT,sub_jid=
+	,cond1=%str(_paramcd='ERYTHDIA' and ATOXGRN>0),cond2=%str(
+	(FAOBJ='Erythema' and FATEST='Longest Diameter' and FASTRESN>=25)
+	or
+	(FAOBJ='Erythema' and index(FATEST,'Intensity') 
+	and (index(upcase(FASTRESC),'GRADE 1') or index(upcase(FASTRESC),'GRADE 2') or index(upcase(FASTRESC),'GRADE 3')))
+	));
+	%end; %else %do;
+	%devdur(paramcd=ERYTHDUR,ds1=&inadar.,ds2=FAAE,tp1=ATPTGR1,tp2=FATPT,sub_jid=
+	,cond1=%str(_paramcd='ERYTHDIA' and ATOXGRN>0),cond2=%str(
+	(FAOBJ='Erythema' and FATEST='Longest Diameter' and FASTRESN>=25)));
+	%end;
+***SWELLDUR***;
+	%if %lowcase(&DSETNAME.)=adarsum %then %do;
+	%devdur(paramcd=SWELLDUR,ds1=&inadar.,ds2=FAAE,tp1=ATPTGR1,tp2=FATPT,sub_jid=
+	,cond1=%str(_paramcd='SWELLDIA' and ATOXGRN>0),cond2=%str(
+	(FAOBJ='Swelling' and FATEST='Longest Diameter' and FASTRESN>=25)
+	or 
+	(FAOBJ='Swelling' and index(FATEST,'Intensity') 
+	and (index(upcase(FASTRESC),'GRADE 1') or index(upcase(FASTRESC),'GRADE 2') or index(upcase(FASTRESC),'GRADE 3')))
+	));
+	%end; %else %do;
+	%devdur(paramcd=SWELLDUR,ds1=&inadar.,ds2=FAAE,tp1=ATPTGR1,tp2=FATPT,sub_jid=
+	,cond1=%str(_paramcd='SWELLDIA' and ATOXGRN>0),cond2=%str(
+	(FAOBJ='Swelling' and FATEST='Longest Diameter' and FASTRESN>=25)));
+	%end;
+***HEADADUR***;
+	%devdur(paramcd=HEADADUR,ds1=&inadar.,ds2=FAAE,tp1=ATPTGR1,tp2=FATPT,sub_jid=
+	,cond1=%str(_paramcd='HEADACHE' and ATOXGRN>0),cond2=%str(FAOBJ='Headache' and upcase(FASTRESC) not in ('NONE','')));
+***FATIGDUR***;
+	%devdur(paramcd=FATIGDUR,ds1=&inadar.,ds2=FAAE,tp1=ATPTGR1,tp2=FATPT,sub_jid=
+	,cond1=%str(_paramcd='FATIGUE' and ATOXGRN>0),cond2=%str(FAOBJ='Fatigue' and upcase(FASTRESC) not in ('NONE','')));
+***MYALGDUR***;
+	%devdur(paramcd=MYALGDUR,ds1=&inadar.,ds2=FAAE,tp1=ATPTGR1,tp2=FATPT,sub_jid=
+	,cond1=%str(_paramcd='MYALGIA' and ATOXGRN>0),cond2=%str(FAOBJ='Myalgia' and upcase(FASTRESC) not in ('NONE','')));
+***ARTHRDUR***;
+	%devdur(paramcd=ARTHRDUR,ds1=&inadar.,ds2=FAAE,tp1=ATPTGR1,tp2=FATPT,sub_jid=
+	,cond1=%str(_paramcd='ARTHRALG' and ATOXGRN>0),cond2=%str(FAOBJ='Arthralgia' and upcase(FASTRESC) not in ('NONE','')));
+***NAUSEDUR***;
+	%devdur(paramcd=NAUSEDUR,ds1=&inadar.,ds2=FAAE,tp1=ATPTGR1,tp2=FATPT,sub_jid=
+	,cond1=%str(_paramcd='NAUSEA' and ATOXGRN>0),cond2=%str(FAOBJ='Nausea/Vomiting' and upcase(FASTRESC) not in ('NONE','')));
+***CHILLDUR***;
+	%devdur(paramcd=CHILLDUR,ds1=&inadar.,ds2=FAAE,tp1=ATPTGR1,tp2=FATPT,sub_jid=
+	,cond1=%str(_paramcd='CHILLS' and ATOXGRN>0),cond2=%str(FAOBJ='Chills' and upcase(FASTRESC) not in ('NONE','')));
+***FEVERDUR***;
+	%if %lowcase(&DSETNAME.)=adarsum %then %do;
+	%devdur(paramcd=FEVERDUR,ds1=&inadar.,ds2=VS,ds3=FAAE,tp1=ATPTGR1,tp2=VSTPT,tp3=FATPT
+	,cond1=%str(_paramcd='FEVER' and ATOXGRN>0),cond2=%str(VSTESTCD='TEMP' and VSSTRESN>=38)
+	,cond3=%str(if FAOBJ in ('Fever','Pyrexia')
+	and (index(upcase(FASTRESC),'GRADE 1') or index(upcase(FASTRESC),'GRADE 2') or index(upcase(FASTRESC),'GRADE 3') or index(upcase(FASTRESC),'GRADE 4'))
+	));
+	%end;%else %do;
+	%devdur(paramcd=FEVERDUR,ds1=&inadar.,ds2=VS,ds3=FAAE,tp1=ATPTGR1,tp2=VSTPT,tp3=FATPT
+	,cond1=%str(_paramcd='FEVER' and ATOXGRN>0),cond2=%str(VSTESTCD='TEMP' and VSSTRESN>=38));
+	%end;
+
+%if %lowcase(&DSETNAME.)=adarsum %then %do;
+	***Duration of Any Solicited AR***;
+	data dev1_ANYDUR;
+	    length PARAMCD $8 timepoint1 $200;
+	    set adb.&inadar.;
+		where ATOXGRN>0;
+		PARAMCD="ANYDUR";
+		timepoint1=ATPTGR1;
+		keep USUBJID ATPTREF PARAMCD timepoint1;
+	run;
+
+	data dev2_ANYDUR;
+	    length PARAMCD $8 timepoint2 $200;
+	    set adb.&inadarp7d.;
+		where ATOXGRN>0 and ANL06FL='Y' and ATPTN>=8;
+		PARAMCD="ANYDUR";
+		timepoint2=ATPTGR1;
+		keep USUBJID ATPTREF PARAMCD timepoint2;
+	run;
+
+	***Duration of Local Solicited AR***;
+	data dev1_LOCDUR;
+	    length PARAMCD $8 timepoint1 $200;
+	    set adb.&inadar.;
+		where ATOXGRN>0 and PARCAT1='LOCAL';
+		PARAMCD="LOCDUR";
+		timepoint1=ATPTGR1;
+		keep USUBJID ATPTREF PARAMCD timepoint1;
+	run;
+
+	data dev2_LOCDUR;
+	    length PARAMCD $8 timepoint2 $200;
+	    set adb.&inadarp7d.;
+		where ATOXGRN>0 and ANL06FL='Y' and ATPTN>=8 and PARCAT1='LOCAL';
+		PARAMCD="LOCDUR";
+		timepoint2=ATPTGR1;
+		keep USUBJID ATPTREF PARAMCD timepoint2;
+	run;
+
+	***Duration of Systemic Solicited AR***;
+	data dev1_SYSDUR;
+	    length PARAMCD $8 timepoint1 $200;
+	    set adb.&inadar.;
+		where ATOXGRN>0 and PARCAT1='SYSTEMIC';
+		PARAMCD="SYSDUR";
+		timepoint1=ATPTGR1;
+		keep USUBJID ATPTREF PARAMCD timepoint1;
+	run;
+
+	data dev2_SYSDUR;
+	    length PARAMCD $8 timepoint2 $200;
+	    set adb.&inadarp7d.;
+		where ATOXGRN>0 and ANL06FL='Y' and ATPTN>=8 and PARCAT1='SYSTEMIC';
+		PARAMCD="SYSDUR";
+		timepoint2=ATPTGR1;
+		keep USUBJID ATPTREF PARAMCD timepoint2;
+	run;
+%end;
+%else %do; /* ADARSUME -ANYDUR,LOCDUR,SYSDUR */ 
+	***Duration of Any Solicited AR***;
+	data dev1_ANYDUR;
+	    length PARAMCD $8;
+	    set dev1_PAINDUR
+	        dev1_ERYTHDUR
+	        dev1_SWELLDUR
+	        dev1_LYMPHDUR
+	        dev1_HEADADUR
+	        dev1_FATIGDUR
+	        dev1_MYALGDUR
+	        dev1_ARTHRDUR
+	        dev1_NAUSEDUR
+	        dev1_CHILLDUR
+	        dev1_FEVERDUR 
+			;
+		PARAMCD="ANYDUR";
+	run;
+
+	data dev2_ANYDUR;
+	    length PARAMCD $8;
+	    set dev2_PAINDUR
+	        dev2_ERYTHDUR
+	        dev2_SWELLDUR
+	        dev2_LYMPHDUR
+	        dev2_HEADADUR
+	        dev2_FATIGDUR
+	        dev2_MYALGDUR
+	        dev2_ARTHRDUR
+	        dev2_NAUSEDUR
+	        dev2_CHILLDUR
+	        dev2_FEVERDUR 
+			;
+		PARAMCD="ANYDUR";
+	run;
+
+
+	***Duration of Local Solicited AR***;
+	data dev1_LOCDUR;
+	    length PARAMCD $8;
+	    set dev1_PAINDUR
+	        dev1_ERYTHDUR
+	        dev1_SWELLDUR
+	        dev1_LYMPHDUR
+			;
+		PARAMCD="LOCDUR";
+	run;
+
+	data dev2_LOCDUR;
+	    length PARAMCD $8;
+	    set dev2_PAINDUR
+	        dev2_ERYTHDUR
+	        dev2_SWELLDUR
+	        dev2_LYMPHDUR
+			;
+		PARAMCD="LOCDUR";
+	run;
+
+	***Duration of Systemic Solicited AR***;
+	data dev1_SYSDUR;
+	    length PARAMCD $8;
+	    set dev1_HEADADUR
+	        dev1_FATIGDUR
+	        dev1_MYALGDUR
+	        dev1_ARTHRDUR
+	        dev1_NAUSEDUR
+	        dev1_CHILLDUR
+	        dev1_FEVERDUR 
+			;
+		PARAMCD="SYSDUR";
+	run;
+
+	data dev2_SYSDUR;
+	    length PARAMCD $8;
+	    set dev2_HEADADUR
+	        dev2_FATIGDUR
+	        dev2_MYALGDUR
+	        dev2_ARTHRDUR
+	        dev2_NAUSEDUR
+	        dev2_CHILLDUR
+	        dev2_FEVERDUR 
+			;
+		PARAMCD="SYSDUR";
+	run;
+%end;
+
+
+
+
+data setall;
+    length timepoint $200;
+    set dev1_: dev2_:;
+	timepoint=coalescec(timepoint1, timepoint2);
+run;
+
+
+***process all***;
+proc sql noprint;
+    create table ARDUR1 as
+	select distinct USUBJID, ATPTREF, PARAMCD, count(distinct timepoint) as AVAL
+	from setall
+	group by USUBJID, ATPTREF, PARAMCD
+	order by USUBJID, ATPTREF, PARAMCD
+	;
+quit;
+
+
+***worst***;
+%macro devwst(paramcd=, cond=);
+
+proc sql noprint;
+    create table _worst_&paramcd. as
+	select distinct USUBJID, ATPTREF, "&paramcd." as PARAMCD length=8, ATOXGRN, ATOXGR, AVAL, AVALC
+	from &inadar.
+	%if %length(&cond.)>0 %then %do;
+	where &cond.
+	%end;
+	group by USUBJID, ATPTREF
+	having ATOXGRN=max(ATOXGRN)
+	order by USUBJID, ATPTREF, AVAL, AVALC
+	;
+quit;
+
+data worst_&paramcd.;
+    set _worst_&paramcd.;
+	by USUBJID ATPTREF AVAL AVALC;
+	if last.ATPTREF;
+run;
+
+%mend devwst;
+
+%devwst(paramcd=WLYMPH, cond=%str(_paramcd='LYMPH'));
+%devwst(paramcd=WPAIN, cond=%str(_paramcd='PAIN'));
+%devwst(paramcd=WERYTH, cond=%str(_paramcd='ERYTHDIA'));
+%devwst(paramcd=WSWELL, cond=%str(_paramcd='SWELLDIA'));
+%devwst(paramcd=WHEAD, cond=%str(_paramcd='HEADACHE'));
+%devwst(paramcd=WFATIGUE, cond=%str(_paramcd='FATIGUE'));
+%devwst(paramcd=WMYALGIA, cond=%str(_paramcd='MYALGIA'));
+%devwst(paramcd=WARTHR, cond=%str(_paramcd='ARTHRALG'));
+%devwst(paramcd=WNAUSEA, cond=%str(_paramcd='NAUSEA'));
+%devwst(paramcd=WCHILLS, cond=%str(_paramcd='CHILLS'));
+%devwst(paramcd=WFEVER, cond=%str(_paramcd='FEVER'));
+%devwst(paramcd=WSAR);
+%devwst(paramcd=WSLAR, cond=%str(PARCAT1='LOCAL'));
+%devwst(paramcd=WSSAR, cond=%str(PARCAT1='SYSTEMIC'));
+
+data ARDUR2;
+    set worst_:;
+	if PARAMCD in ('WSAR','WSLAR','WSSAR') then call missing(AVALC);
+	call missing(AVAL);
+run;
+
+
+data ARDUR_all;
+    length PARAM $200 PARCAT1 $50;
+    set ARDUR1 ARDUR2;
+	PARAM=put(PARAMCD,$param.);
+	if PARAMCD in ('LYMPHDUR', 'PAINDUR', 'ERYTHDUR', 'SWELLDUR', 'WLYMPH', 'WPAIN', 'WERYTH', 'WSWELL', 'WSLAR') then do;
+	    PARCAT1='LOCAL';
+		PARCAT1N=1;
+	end;
+	else if PARAMCD in ('HEADADUR', 'FATIGDUR', 'MYALGDUR', 'ARTHRDUR', 'NAUSEDUR', 'CHILLDUR', 'FEVERDUR', 
+        'WHEAD', 'WFATIGUE', 'WMYALGIA', 'WARTHR', 'WNAUSEA', 'WCHILLS', 'WFEVER', 'WSSAR') then do;
+	    PARCAT1='SYSTEMIC';
+		PARCAT1N=2;
+	end;
+run;
+
+
+***anl01fl***;
+proc sql noprint;
+    create table _anl01fl as
+	select distinct USUBJID, ATPTREF, PARAMCD, min(ATPTGR1N) as min_ATPTGR1N
+	from adb.&inadarp7d.
+	where PARAMCD in ('PAIN','ERYTHDIA','SWELLDIA') and ATOXGRN>0
+	group by USUBJID, ATPTREF, PARAMCD
+	having min_ATPTGR1N>=8
+	order by USUBJID, ATPTREF, PARAMCD
+	;
+quit;
+
+data __anl01fl;
+    length PARAMCD $8;
+    set _anl01fl(rename=(PARAMCD=_PARAMCD));
+	if _PARAMCD='PAIN' then PARAMCD='PAINDUR';
+	if _PARAMCD='ERYTHDIA' then PARAMCD='ERYTHDUR';
+	if _PARAMCD='SWELLDIA' then PARAMCD='SWELLDUR';
+	drop _PARAMCD min_ATPTGR1N;
+run;
+
+proc sort data=ARDUR_all; by USUBJID ATPTREF PARAMCD; run;
+
+data ARDUR_anl;
+    merge ARDUR_all(in=a) __anl01fl(in=b);
+	by USUBJID ATPTREF PARAMCD;
+	if a;
+	if b then ANL01FL='Y';
+run;
+
+
+
+*** anl02fl;
+proc sql noprint;
+    create table _anl02fl as
+	select distinct USUBJID, ATPTREF, PARAMCD, min(ATPTGR1N) as min_ATPTGR1N
+	from adb.&inadarp7d.
+	where PARAMCD in ('PAIN','ERYTHDIA','SWELLDIA','LYMPH','HEADACHE','FATIGUE','MYALGIA','ARTHRALG','NAUSEA','CHILLS','FEVER') and ATOXGRN>0
+	group by USUBJID, ATPTREF, PARAMCD
+	having min_ATPTGR1N>=8
+	order by USUBJID, ATPTREF, PARAMCD
+	;
+quit;
+
+data __anl02fl;
+    length PARAMCD $8;
+    set _anl02fl(rename=(PARAMCD=_PARAMCD));
+	if _PARAMCD='PAIN' then PARAMCD='PAINDUR';
+	if _PARAMCD='ERYTHDIA' then PARAMCD='ERYTHDUR';
+	if _PARAMCD='SWELLDIA' then PARAMCD='SWELLDUR';
+	if _PARAMCD='LYMPH' then PARAMCD='LYMPHDUR';
+	if _PARAMCD='HEADACHE' then PARAMCD='HEADADUR';
+	if _PARAMCD='FATIGUE' then PARAMCD='FATIGDUR';
+	if _PARAMCD='MYALGIA' then PARAMCD='MYALGDUR';
+	if _PARAMCD='ARTHRALG' then PARAMCD='ARTHRDUR';
+	if _PARAMCD='NAUSEA' then PARAMCD='NAUSEDUR';
+	if _PARAMCD='CHILLS' then PARAMCD='CHILLDUR';
+	if _PARAMCD='FEVER' then PARAMCD='FEVERDUR';
+	drop _PARAMCD min_ATPTGR1N;
+run;
+
+proc sort data=ARDUR_anl; by USUBJID ATPTREF PARAMCD; run;
+proc sort data=__anl02fl; by USUBJID ATPTREF PARAMCD; run;
+
+data adarsum;
+    merge ARDUR_anl(in=a) __anl02fl(in=b);
+	by USUBJID ATPTREF PARAMCD;
+	if a;
+	if not b then anl02fl='Y';
+run;
+
+data &DSETNAME.;
+	merge adarsum(in=a) adb.adsl(in=b);
+	by usubjid;
+	if a and b;
+
+	%if %lowcase(&DSETNAME.)=adarsum %then %do;
+	if DOSE2FL='N' and ATPTREF='Vaccination 2' then delete;
+	%end;
+run;
+
+**Generate final dataset by updating certain attributes. Optionally merge common variables & create sequence variable as needed**;
+%trta(dsname=&DSETNAME);
+
+
+%adam_dataset_update(
+	ds=&DSETNAME,
+	libin=work,
+	libout=output,
+	adsllib=adb,
+	addcomvar=Y,
+	addseq=,
+	dropinfmt=Y,
+	mapspecfile=&ADAM_SPEC,
+	maploc=&ADAM_SPEC_LOC,
+	debug=N
+	);
+	
+	
+**Generate Value Level Metadata values for the ad<xx> dataset**;
+%* dod_vlm(        
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&ADAM_SPEC_LOC,
+	specname=&ADAM_SPEC,
+	debug=N
+	);
+
+**Generate Enhanced Controlled Terminology for the ad<xx> dataset**;
+%* dod_enhcd_ct(            
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&ADAM_SPEC_LOC,
+	specname=&ADAM_SPEC,
+	map_ct_nm=,
+	map_ct_loc=,
+	debug=N
+	);

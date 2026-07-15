@@ -1,0 +1,1606 @@
+*************************************************************************************************;
+*           CLIENT: ModernaTX, Inc.
+*         PROTOCOL: mRNA-1273-P301
+*          PURPOSE: Define Study Level ArtZ Defaults macros 
+*      INPUT FILES: None 
+*     OUTPUT FILES: None
+*      USAGE NOTES: %include into all ArtZ programs
+*************************************************************************************************;
+*  Copyright 2020 Pharmaceutical Product Development, Inc.
+*  All Rights Reserved.
+*************************************************************************************************;
+
+%put >>>> ARTZ_DEFAULTS; 
+options noquotelenmax missing='';
+
+**** DEFINE FORMATS FOR GLOBAL USE ***;
+%include "mtl_formats.sas";
+
+** DEBUG and HELP;
+        %let _default_debug = NO; 
+        %let _default_help = NO; 
+
+** RTF defaults;
+        *ods escape character;
+        %let _default_escapechar  = ^;
+		%let escapechar = ^;
+   		%let hyphen = ;
+		%let linen=6;
+			 
+		%let cohortn = covbln;
+		%let subgroup = ;
+		%let subgroup_fmt = covbl.;
+		%let subtit_agegn=%nrstr(Age Group: );
+		%let subtit_fmt = covbl.;
+		%let subtitfl=N;
+		%let spantitfl=Y;
+		%let cipen = 95;
+
+        *upcase or lowcase the name of the RTF output file;
+        %let _default_filecase = lowcase;
+
+        ** RTF Template;
+    	%include "mu_rtf_template.sas";
+
+	%macro update_template;
+	%global _default_template_style _footnote_page1_text tf_extract_mw
+			_DEFAULT_PAGE_LENGTH_LINES _DEFAULT_PAGE_WIDTH_CHARS;
+
+	%if %symexist(g_outtype)=0 %then %do;
+        %mu_rtf_template
+        (papersize='LETTER'
+        , orientation=landscape
+        , font=Courier New
+        , fontsize=9
+        , leftmargin='1in'
+        , rightmargin='1in'
+        , topmargin='1in'
+        , bottommargin='1in'
+        , style=STYLES.POSTTEXT
+        );
+        
+        *identify the RTF style sheet to be used by MR_ODSOUT;
+        %let _default_template_style = STYLES.POSTTEXT;
+    	%let _footnote_page1_text = %nrstr(Note: Footnotes are listed on the last page.);
+
+		*** Page size;
+          *the number of lines that fit on the report including titles, footnotes, headers, and body;
+        %let _DEFAULT_PAGE_LENGTH_LINES = 42;
+          *how many characters that can fit onto one line of your rtf file;
+        %let _DEFAULT_PAGE_WIDTH_CHARS = 117;
+	%end; %else %if %symexist(g_outtype) ne 0 %then %do;
+		** Intext Output;
+        %mu_rtf_template
+        (papersize='A4'
+        , orientation=&g_orient.
+        , font=Times New Roman
+        , fontsize=10
+		, titlefontsize=12
+		, footfont=10
+		, fontstyle=bold
+		, borderwidth=0.75 pt
+		, cellpadding=2pt
+        , leftmargin='1in'
+        , rightmargin='1in'
+        , topmargin='1in'
+        , bottommargin='1in'
+        , style=STYLES.INTEXT
+        );
+		%let _default_template_style = STYLES.INTEXT;
+		%let tf_extract_mw = intext;
+		%let _DEFAULT_PAGE_LENGTH_LINES = 80;
+		%let _DEFAULT_PAGE_WIDTH_CHARS = 117;
+	%end;
+	%mend update_template;
+	%update_template;
+        
+        
+	%macro intext_footnote(startpg=no);
+		%global fpage;
+		%let FPAGE=;
+
+		proc sql noprint;
+		select compress(put(max(_seq),best.)) into:_seq from fpage;
+		quit;  
+
+		data fpage1;
+			set fpage;
+			if index(text,'{super') then text=tranwrd("^R/RTF'\ql \.\li360\fi-360\.'" ||text,'}','} {\tab}');
+		run;
+
+		data fpage2;
+			set fpage;
+			text=tranwrd("Program Path: &G_FULLPATH.&G_PGMNAME..sas &SYSDATE9. &SYSTIME. ",'\','\\');
+			if _n_=1;
+		run;
+
+		data fpage;
+			set fpage1 fpage2;
+		run;
+
+		ods rtf startpage=&startpg.;
+/*		footnote%eval(&_seq.+1) just=l "Program Path: &G_FULLPATH.&G_PGMNAME..sas &SYSDATE9. &SYSTIME. ";*/
+
+		proc report data=fpage nowd;
+		column text;
+		define text / '' display style(column)=[just=l asis=on cellwidth=98%] ;
+		run ;
+	%mend intext_footnote;
+
+	%macro intext_rowtext(vcol=col1);
+		data final;
+			set final;
+			if &vcol.=:'0' or &vcol.=:'1' or &vcol.='2' or &vcol.='9' then 
+				&vcol. = substr(&vcol.,1,2)||upcase(substr(&vcol.,3,1))||substr(lowcase(&vcol.),4);
+			else if &vcol.^=:' ' then &vcol. = upcase(substr(&vcol.,1,1))||substr(lowcase(&vcol.),2);
+			else if &vcol.=:'    ' then &vcol. = '    '||upcase(substr(&vcol.,5,1))||substr(lowcase(&vcol.),6);
+			else if &vcol.=:'  ' then &vcol. = '  '||upcase(substr(&vcol.,3,1))||substr(lowcase(&vcol.),4);
+			else if &vcol.=:' ' then &vcol. = ' '||upcase(substr(&vcol.,2,1))||substr(lowcase(&vcol.),3);
+
+			&vcol. = tranwrd(&vcol.,'(pp)','(PP)'); 
+			&vcol. = tranwrd(&vcol.,'(mitt)','(mITT)'); 
+			&vcol. = tranwrd(&vcol.,'intent-to-treat','Intent-to-Treat');  
+			&vcol. = tranwrd(tranwrd(&vcol.,'sars-cov-2','SARS-CoV-2'),'Sars-cov-2','SARS-CoV-2'); 
+			&vcol. = tranwrd(tranwrd(&vcol.,'covid-19','COVID-19'),'Covid-19','COVID-19'); 
+			&vcol. = tranwrd(&vcol.,'mrna-1273','mRNA-1273');
+			&vcol. = tranwrd(&vcol.,' placebo',' Placebo');
+			&vcol. = tranwrd(&vcol.,'(crf)','(CRF)');
+			&vcol. = tranwrd(&vcol.,'rt-pcr','RT-PCR');
+			&vcol. = tranwrd(tranwrd(&vcol.,' Boi',' BOI'),'Boi ','BOI ');
+			&vcol. = tranwrd(tranwrd(&vcol.,' boi',' BOI'),'boi ','BOI ');
+			&vcol. = tranwrd(tranwrd(tranwrd(tranwrd(tranwrd(&vcol.,' Bod',' BOD'),' bod',' BOD'),'Bod ','BOD '),'BODy','body'),'  body','  Body');
+			&vcol. = tranwrd(tranwrd(&vcol.,' pdv/',' PDV/'),' pdv ',' PDV ');
+			&vcol. = tranwrd(&vcol.,' teaes',' TEAEs');
+			&vcol. = tranwrd(&vcol.,' ar ',' AR ');
+			&vcol. = tranwrd(tranwrd(&vcol.,'gm ','GM '),'Gm ','GM '); 
+			&vcol. = tranwrd(&vcol.,'temperature (c)','temperature (C)'); 
+			&vcol. = tranwrd(tranwrd(tranwrd(tranwrd(&vcol.,'stage iv','stage IV'),'stage ii ','stage II'),'stage i ','stage I'),'stage v ','stage V ');
+			&vcol. = tranwrd(tranwrd(tranwrd(tranwrd(tranwrd(tranwrd(&vcol.,'Vitamin d ','Vitamin D '),'Vitamin c ','Vitamin C '),'vitamin d ','Vitamin D '),'vitamin c ','Vitamin C '),'Vitamin b','Vitamin B'),'vitamin b','vitamin B');
+			
+			&vcol. = tranwrd(&vcol.,'95% ci','95% CI');
+			&vcol. = tranwrd(tranwrd(&vcol.,'uloq:','ULOQ:'),'lloq:','LLOQ:');
+			&vcol. = tranwrd(&vcol.,'n1','N1');
+			&vcol. = tranwrd(&vcol.,'n/n','n/N');
+
+			if &vcol.='N' then &vcol.='n';
+			else if &vcol.='  N' then &vcol.='  n';
+			else if &vcol.='    N' then &vcol.='    n';
+			else if &vcol.=:'N (%)' then &vcol. = tranwrd(&vcol.,'N (%) [','n (%) [');
+			else if &vcol.=:'N [' then &vcol. = tranwrd(&vcol.,'N [','n [');
+			&vcol. = tranwrd(&vcol.,'(sd)','(SD)'); 
+			&vcol. = tranwrd(tranwrd(&vcol.,', max',', Max'),' max ',' Max '); 
+			&vcol. = tranwrd(tranwrd(&vcol.,'q1','Q1'),'q3','Q3');
+			&vcol. = tranwrd(tranwrd(&vcol.,' min ',' Min '),' min,',' Min,');
+			&vcol. = tranwrd(&vcol.,' median ',' Median ');
+			&vcol. = tranwrd(&vcol.,'P-value','p-value'); 
+		run;
+	%mend intext_rowtext;
+ 
+
+*** DISPLAY DEFAULTS ***;
+        ** text for displays with no subjects;
+        %let _default_no_subjects_table = There are no observations for this table.;
+        %let _default_no_subjects_listing = There are no observations for this listing.;
+	    %let _default_no_subjects_subset = There are no observations for this section.;
+	    %let _default_no_subjects_figure = There are no observations for this figure.;
+
+        ** height of skipped line;
+        %let _DEFAULT_SKIP_LINE_CELL_HEIGHT = 1.5ex;
+		%let _UPDATE1_SKIP_LINE_CELL_HEIGHT = 4.5ex;
+		%let _UPDATE2_SKIP_LINE_CELL_HEIGHT = 4ex;
+		%let _UPDATE3_SKIP_LINE_CELL_HEIGHT = 6ex;
+		%let _UPDATE4_SKIP_LINE_CELL_HEIGHT = 8ex;
+
+	    %let _default_continued_text = (Cont.);
+	    %let n_a = NA;
+	    %let n_e = NE;
+	    %let _default_uncoded = UNCODED;
+	    %let _default_offset = 0;
+	    %let _default_hyphen = ;
+        
+** TOTAL/SUBTOTAL GROUPS ****;
+        * step 1 -- define the total and/or subtotals as list-of-codes = new-code
+        * if there is more than one total or subtotal, separate the assignments with 
+        * an exclamation point.  For example, if there are three arms in the study and 
+        * you need to produce a subtotal of treatments 1 and 2 and a total of 1 2 and 3
+        * then use 1 2 = 4 ! 1 2 3 = 5.  If you are using letters as your codes, be sure 
+        * to use quotation marks ;
+        %let _DEFAULT_DEFINE_TOTAL_GROUPS = 1 2 8 = 99;  
+
+        * step 2 -- define a format that will be used by proc means/preloadfmt to
+        * `dummy` out the treatment groups if needed.  This is a simple one-to-one
+        * assignment of the treatment groups including the total/subtotals defined above;
+        proc format;
+        value trtpl
+        1='1'
+        2='2'
+   		8='8'
+        99='99'
+        ;
+        value trtplseq
+        1='1'
+        2='2'
+		3='3'
+   		8='8'
+        99='99'
+        ;
+	    
+	    value $socn
+	      "infections and infestations"=1
+	      "neoplasms benign, malignant and unspecified (incl cysts and polyps)"=2
+	      "blood and lymphatic system disorders"=3
+	      "immune system disorders"=4
+	      "endocrine disorders"=5
+	      "metabolism and nutrition disorders"=6
+	      "psychiatric disorders"=7
+	      "nervous system disorders"=8
+	      "eye disorders"=9 
+	      "ear and labyrinth disorders"=10
+	      "cardiac disorders"=11
+	      "vascular disorders"=12
+	      "respiratory, thoracic and mediastinal disorders"=13
+	      "gastrointestinal disorders"=14
+	      "hepatobiliary disorders"=15
+	      "skin and subcutaneous tissue disorders"=16
+	      "musculoskeletal and connective tissue disorders"=17
+	      "renal and urinary disorders"=18
+	      "pregnancy, puerperium and perinatal conditions"=19
+	      "reproductive system and breast disorders"=20
+	      "congenital, familial and genetic disorders"=21
+	      "general disorders and administration site conditions"=22
+	      "investigations"=23
+	      "injury, poisoning and procedural complications"=24
+	      "surgical and medical procedures"=25
+	      "social circumstances"=26
+	      "product issues"=27
+	      "uncoded"=99;
+        run;
+
+
+    	%let _default_trtvar = trt01pn;
+        %let _DEFAULT_TRTVAR_PRELOADFMT = TRTPL.;
+
+        * step 3 -- define a format used to create the column header macros -- that is, 
+        * how the treatments will be displayed in the reports.  Note that this format will 
+        * always be character;
+        *** define the treatment display with embedded proc report splits as needed;
+
+        %let _default_prcode_split = $;
+
+        ** format with splits;
+        proc format;
+        value $trtdsp1_
+        '1'= "Placebo"
+        '2'= "mRNA-1273"
+   		'8'= "Missing"
+        '99' = "Total"
+        ; 
+
+		value $trtdsp2_
+        "Placebo" = "1"
+        "mRNA-1273" = "2"
+   		"Missing" = "3"
+        "Total" = "99"
+        ; 
+		
+        value $trtdsp3_
+        '1'= "Placebo"
+        '2'= "Placebo-$mRNA-1273"
+        '3'= "mRNA-1273"
+   		'8'= "Missing"
+        '99' = "Total"
+        ; 
+        run;
+        %let _DEFAULT_DISPLAY_FMT = $trtdsp1_.;  
+
+
+        ** step 4 -- the order of treatments across the page.  If interleaving, separate the pages
+        ** with an exclamation point (!).  For example, to display treatments 1, 2 and 3
+        ** on page 1 and treatments 4 5 and 6 on page 2, then set to 1 2 3 ! 4 5 6;
+        %let _default_interleave_trt_sequence = 1 2 8 = 99;
+
+*** BIGN DEFAULTS ****;
+        * If you have to do any standard manipulation to the dataset to be used 
+        * for big Ns, then do so here. ;
+        * For exmaple, the ADSL data did not include the SAMFL flag, 
+        * it must be merged in from ADEX - consider whether this type of manipulation might be 
+        * better off in the analysis data base;
+        
+
+        %macro process_covbln(spanYN=Y,spaner=);
+	        array ta(2) TRTAN TRTPN;
+	        if missing(trt01an) then trt01an=8;
+	        if missing(trt01pn) then trt01pn=8;
+	        if missing(trtan) then trtan=8;
+	        if missing(trtpn) then trtpn=8;
+			if missing(trtseqan) then trtseqan=8;
+	        if missing(trtseqpn) then trtseqpn=8;
+
+			%if &spanYN.=Y %then %do; _span = "&spaner."; %end;
+			%else %do; _span = ''; %end;
+			if _n_=1 then call symput('glospaner',_span);
+			drop _span;
+
+
+
+			%if &spaner.=agegn or &spaner.=agegn_title %then %do;
+			  if agegr1n in (1 2) then covbln=agegr1n+5; else covbln=8;
+			  format covbln agegn.;
+			  output;
+			%end;
+			%else %if &spaner.=agegn2 or &spaner.=agegn2_title %then %do;
+			  if agegr2n in (1 2 3) then covbln=agegr2n+4; else covbln=8;
+			  format covbln agegnn.;
+			  output;
+			%end;
+			%else %if &spaner.=agegn3 or &spaner.=agegn3_title %then %do;
+			  if agegr3n in (1 2 3 4) then covbln=agegr3n+3; else covbln=8;
+			  format covbln agesub.;
+			  output;
+			%end;
+			%else %if &spaner.=agegn4 or &spaner.=agegn4_title %then %do;
+			  if agegr4n in (1 2) then do; covbln=agegr4n+4; output; end;
+			  if agegr4n in (1 2) then do; covbln=7; agegr4n=3; AGEGR4 = '>=18 and <=50 Years'; output; end;
+			  if agegr4n=. then do; covbln=8; AGEGR4 = 'Missing'; output; end;
+			  format covbln agegrrn.;
+			%end;
+			%else %if &spaner.=strata or &spaner.=strata_title %then %do;
+			  if stratarn in (1 2 3) then covbln=stratarn+4; else covbln=8;
+			  format covbln stratan.;
+			  output;
+			%end;
+			%else %if &spaner.=stratav or &spaner.=stratav_title %then %do;
+			  if stratavn in (1 2 3) then covbln=stratavn+4; else covbln=8;
+			  format covbln stratan.;
+			  output;
+			%end;
+			%else %if &spaner.=sex or &spaner.=sex_title %then %do;
+			  if SEX='M' then covbln=6; 
+			  else if SEX='F' then covbln=7;
+			  else covbln=8;
+			  format covbln sexnn.;
+			  output;
+			%end;
+			%else %if &spaner.=agesex or &spaner.=agesex_title %then %do;
+			  if agegr1n=1 and SEX='M' then covbln=4; 
+			  else if agegr1n=1 and SEX='F' then covbln=5;
+			  else if agegr1n=2 and SEX='M' then covbln=6;
+			  else if agegr1n=2 and SEX='F' then covbln=7;
+			  else covbln=8;
+			  format covbln ethnicn.;
+			  output;
+			%end;
+			%else %if &spaner.=rac or &spaner.=rac_title %then %do;
+			  if RACE='WHITE' then covbln=11; 
+			  else if RACE='BLACK OR AFRICAN AMERICAN' then covbln=12;
+			  else if RACE='ASIAN' then covbln=13;
+			  else if RACE='AMERICAN INDIAN OR ALASKA NATIVE' then covbln=14;
+			  else if RACE='NATIVE HAWAIIAN OR OTHER PACIFIC ISLANDER' then covbln=15;
+			  else if RACE='MULTIPLE' then covbln=16;
+			  else if RACE in ('OTHER' 'NOT REPORTED' 'UNKNOWN') then covbln=17;
+			  else covbln=8;
+			  format covbln racnn.;
+			  output;
+			%end;
+			%else %if &spaner.=race or &spaner.=race_title %then %do;
+			  if RACE='WHITE' then covbln=11; 
+			  else if RACE='BLACK OR AFRICAN AMERICAN' then covbln=12;
+			  else if RACE='ASIAN' then covbln=13;
+			  else if RACE='AMERICAN INDIAN OR ALASKA NATIVE' then covbln=14;
+			  else if RACE='NATIVE HAWAIIAN OR OTHER PACIFIC ISLANDER' then covbln=15;
+			  else if RACE='OTHER' then covbln=17;
+			  else if RACE='MULTIPLE' then covbln=16;
+			  else if RACE='NOT REPORTED' then covbln=18;
+			  else if RACE='UNKNOWN' then covbln=19;
+			  else covbln=8;
+			  format covbln racenn.;
+			  output;
+			%end;
+			%else %if &spaner.=eth or &spaner.=eth_title %then %do;
+			  if ETHNIC='HISPANIC OR LATINO' then do; covbln=6; output; end; 
+			  else if ETHNIC='NOT HISPANIC OR LATINO' then do; covbln=7; output; end;
+			  else if ETHNIC='' then do; covbln=8; output; end;
+			  format covbln ethn.;
+			%end;
+			%else %if &spaner.=ethnic or &spaner.=ethnic_title %then %do;
+			  if ETHNIC='HISPANIC OR LATINO' then covbln=4; 
+			  else if ETHNIC='NOT HISPANIC OR LATINO' then covbln=5;
+			  else if ETHNIC='NOT REPORTED' then covbln=6;
+			  else if ETHNIC='UNKNOWN' then covbln=7;
+			  else covbln=8;
+			  format covbln ethnicn.;
+			  output;
+			%end;
+			%else %if &spaner.=minority or &spaner.=minority_title %then %do;
+			  if MINORITY ='Minority' then covbln=6; 
+			  else if MINORITY ='Non-minority' then covbln=7;
+			  else covbln=8;
+			  format covbln minnn.;
+			  output;
+			%end;
+			%else %if &spaner.=racegr1 or &spaner.=racegr1_title %then %do;
+			  if RACEGR1N=1 then covbln=6; 
+			  else if RACEGR1N=2 then covbln=7;
+			  else covbln=8;
+			  format covbln racegr1nn.;
+			  output;
+			%end;
+			%else %if &spaner.=elecsbl or &spaner.=elecsbl_title %then %do;
+			  if ELECSBL='Negative' then covbln=6; 
+			  else if ELECSBL='Positive' then covbln=7;
+			  else covbln=8;
+			  format covbln elecsbln.;
+			  output;
+			%end;
+			%else %if &spaner.=rethgr1 or &spaner.=rethgr1_title %then %do;
+			  if RETHGR1N=1 then covbln=6; 
+			  else if RETHGR1N=2 then covbln=7;
+			  else covbln=8;
+			  format covbln rethgr1nn.;
+			  output;
+			%end;
+			%else %if &spaner.=agerisk or &spaner.=agerisk_title %then %do;
+			  if AGEGR1N=1 and RISKGR1N=2 then covbln=4; 
+			  else if AGEGR1N=1 and RISKGR1N=1 then covbln=5;
+			  else if AGEGR1N=2 and RISKGR1N=2 then covbln=6;
+			  else if AGEGR1N=2 and RISKGR1N=1 then covbln=7;
+			  else covbln=8;
+			  format covbln ageriskn.;
+			  output;
+			%end;
+			%else %if &spaner.=bmibl or &spaner.=bmibl_title %then %do;
+			  if round(BMIBL,0.000001)>=30 then covbln=6;
+			  else if .<round(BMIBL,0.000001)<30 then covbln=7;
+			  else covbln=8;
+			  format covbln bmibln.;
+			  output;
+			%end;
+			%else %if &spaner.=saran or &spaner.=saran_title %then %do; 	
+			  	if SAR1FL='Y' then do; covbln=6; output; end;
+				if SAR2FL='Y' then do; covbln=7; output; end;
+				format covbln saran.;
+			%end;
+			%else %if &spaner.=saran_m or &spaner.=saran_mtitle %then %do; 	
+			  	if SAR1FL='Y' and MDOSREF='Vaccination 1' then do; covbln=6; output; end;
+				if SAR2FL='Y' and MDOSREF='Vaccination 2' then do; covbln=7; output; end;
+				format covbln saran.;
+			%end;
+			%else %if &spaner.=period or &spaner.=period_title %then %do;
+				array _mrd(1) 8. MRDSTDY;	
+			  	if .<MRDSTDY<=7 then covbln=6; 
+				else if 7<MRDSTDY<=28 then covbln=7;
+				else covbln=8;
+				format covbln periodn.;
+				output;
+			%end;
+			%else %if &spaner.=riskgrn or &spaner.=riskgrn_title %then %do;
+			  if riskgr1n in (1 2) then covbln=riskgr1n+5; else covbln=8;
+			  format covbln riskgrn.;
+			  output;
+			%end;
+			%else %if &spaner.=riskfn or &spaner.=riskfn_title %then %do;
+				cmissn_risk = cmiss(rskf1,rskf2,rskf3,rskf4,rskf5,rskf6);
+				if riskgr1n=2 then do; covbln=5; output; end;
+				if cmissn_risk=5 then do; covbln=6; output; end;
+				if cmissn_risk<5 then do; covbln=7; output; end;
+				format covbln riskfn.;
+			%end;
+			%else %if &spaner.=rskf or &spaner.=rskf_title %then %do;
+				if ^missing(rskf1) then do; covbln=13; output; end;
+				if ^missing(rskf2) then do; covbln=14; output; end;
+				if ^missing(rskf3) then do; covbln=15; output; end;
+				if ^missing(rskf4) then do; covbln=16; output; end;
+				if ^missing(rskf5) then do; covbln=17; output; end;
+				if ^missing(rskf6) then do; covbln=18; output; end;
+				format covbln rskfn.;
+			%end;
+			%else %if &spaner.=risk or &spaner.=risk_title %then %do;
+				cmissn_risk = cmiss(rskf1,rskf2,rskf3,rskf4,rskf5,rskf6); 	
+			  	if cmissn_risk<6 then do; covbln=11; output; end;
+				if cmissn_risk=6 then do; covbln=12; output; end;
+				if cmissn_risk=5 then do; covbln=13; output; end;
+				if cmissn_risk<5 then do; covbln=14; output; end;
+				if ^missing(rskf1) then do; covbln=15; output; end;
+				if ^missing(rskf2) then do; covbln=16; output; end;
+				if ^missing(rskf3) then do; covbln=17; output; end;
+				if ^missing(rskf4) then do; covbln=18; output; end;
+				if ^missing(rskf5) then do; covbln=19; output; end;
+				if ^missing(rskf6) then do; covbln=20; output; end;
+			%end;
+			%else %if &spaner.=agersk or &spaner.=agersk_title %then %do; 	
+			  	if agegr1n=1 and riskgr1n=1 then do; covbln=11; output; end;
+				if agegr1n=1 and ^missing(rskf1) then do; covbln=12; output; end;
+				if agegr1n=1 and ^missing(rskf2) then do; covbln=13; output; end;
+				if agegr1n=1 and ^missing(rskf3) then do; covbln=14; output; end;
+				if agegr1n=1 and ^missing(rskf4) then do; covbln=15; output; end;
+				if agegr1n=1 and ^missing(rskf5) then do; covbln=16; output; end;
+				if agegr1n=1 and ^missing(rskf6) then do; covbln=17; output; end;
+				if agegr1n=2 and riskgr1n=1 then do; covbln=18; output; end;
+				if agegr1n=2 and ^missing(rskf1) then do; covbln=19; output; end;
+				if agegr1n=2 and ^missing(rskf2) then do; covbln=20; output; end;
+				if agegr1n=2 and ^missing(rskf3) then do; covbln=21; output; end;
+				if agegr1n=2 and ^missing(rskf4) then do; covbln=22; output; end;
+				if agegr1n=2 and ^missing(rskf5) then do; covbln=23; output; end;
+				if agegr1n=2 and ^missing(rskf6) then do; covbln=24; output; end;
+				if missing(agegr1n) or missing(riskgr1n) then do; covbln=8; output; end;
+			%end;
+			%else %if &spaner.=health or &spaner.=health_title %then %do; 	
+			  	if ^missing(adrisk1) then do; covbln=11; output; end;
+				if ^missing(adrisk2) then do; covbln=12; output; end;
+				if ^missing(adrisk3) then do; covbln=13; output; end;
+				if ^missing(adrisk4) then do; covbln=14; output; end;
+				if ^missing(adrisk5) then do; covbln=15; output; end;
+				if ^missing(adrisk6) then do; covbln=16; output; end;
+				if ^missing(adrisk7) then do; covbln=17; output; end;
+				if ^missing(adrisk8) then do; covbln=18; output; end;
+				if ^missing(adrisk9) then do; covbln=19; output; end;
+				if ^missing(adrisk10) then do; covbln=20; output; end;
+				if ^missing(adrisk11) then do; covbln=21; output; end;
+				if ^missing(adrisk12) then do; covbln=22; output; end;
+				if cmiss(of adrisk1-adrisk12)=12 then do; covbln=88; output; end;
+			%end;
+			%else %if &spaner.=healthocc or &spaner.=healthocc_title %then %do; 	
+			  	if ^missing(adrisk1) then do; covbln=5; output; end;
+				if ^missing(adrisk2) then do; covbln=6; output; end;
+				if ^missing(adrisk3) then do; covbln=7; output; end;
+			%end;
+			%else %if &spaner.=agersknum or &spaner.=agersknum_title %then %do; 
+				cmissn_risk = cmiss(rskf1,rskf2,rskf3,rskf4,rskf5,rskf6);	
+			  	if agegr1n=1 and riskgr1n=1 then do; covbln=11; output; end;
+				if agegr1n=1 and cmissn_risk=5 then do; covbln=12; output; end;
+				if agegr1n=1 and cmissn_risk=4 then do; covbln=13; output; end;
+				if agegr1n=1 and cmissn_risk=3 then do; covbln=14; output; end;
+				if agegr1n=1 and cmissn_risk=2 then do; covbln=15; output; end;
+				if agegr1n=1 and cmissn_risk=1 then do; covbln=16; output; end;
+				if agegr1n=1 and cmissn_risk=0 then do; covbln=17; output; end;
+				if agegr1n=2 and riskgr1n=1 then do; covbln=18; output; end;
+				if agegr1n=2 and cmissn_risk=5 then do; covbln=19; output; end;
+				if agegr1n=2 and cmissn_risk=4 then do; covbln=20; output; end;
+				if agegr1n=2 and cmissn_risk=3 then do; covbln=21; output; end;
+				if agegr1n=2 and cmissn_risk=2 then do; covbln=22; output; end;
+				if agegr1n=2 and cmissn_risk=1 then do; covbln=23; output; end;
+				if agegr1n=2 and cmissn_risk=0 then do; covbln=24; output; end;
+				if missing(agegr1n) or missing(riskgr1n) then do; covbln=8; output; end;
+			%end;
+			%else %do;
+			  array _scov (1) $200 scov2bl;
+		      if scov2bl='Negative' then covbln=6;
+		      else if scov2bl='Positive' then covbln=7;
+		      else covbln=8;
+			  format covbln scov2bln.;
+			  output;
+			%end;
+
+	      covbln=9;
+	      output;
+        %mend process_covbln;
+        
+        data adsl_b;
+	      set adb.adsl;
+	      %process_covbln(spaner=);
+	    run;
+
+*** ADAE AEBODSYS AEDECOD DEFAULTS ****;
+		%macro blankprogram;
+		%mend blankprogram;
+
+	    %macro socn;
+	      if missing(AEBODSYS) then AEBODSYS = propcase("&_default_uncoded.");
+	      if missing(AEDECOD) then AEDECOD = propcase("&_default_uncoded.");
+
+	      if lowcase(AEBODSYS) in (
+	      "infections and infestations"
+	      "neoplasms benign, malignant and unspecified (incl cysts and polyps)"
+	      "blood and lymphatic system disorders"
+	      "immune system disorders"
+	      "endocrine disorders"
+	      "metabolism and nutrition disorders"
+	      "psychiatric disorders"
+	      "nervous system disorders"
+	      "eye disorders" 
+	      "ear and labyrinth disorders"
+	      "cardiac disorders"
+	      "vascular disorders"
+	      "respiratory, thoracic and mediastinal disorders"
+	      "gastrointestinal disorders"
+	      "hepatobiliary disorders"
+	      "skin and subcutaneous tissue disorders"
+	      "musculoskeletal and connective tissue disorders"
+	      "renal and urinary disorders"
+	      "pregnancy, puerperium and perinatal conditions"
+	      "reproductive system and breast disorders"
+	      "congenital, familial and genetic disorders"
+	      "general disorders and administration site conditions"
+	      "investigations"
+	      "injury, poisoning and procedural complications"
+	      "surgical and medical procedures"
+	      "social circumstances"
+	      "product issues"
+	      "uncoded") then socn = input(put(lowcase(AEBODSYS),socn.),best.);
+	      else if ^missing(AEBODSYS) then do;
+	        socn = 98;
+	      end;
+	    %mend;
+    
+
+        * Consider creating data sets for each analysis set and then identifying 
+        * that data set in the at the domain default or template level.  
+        * For example, BigN_safety/BigN_Actual, BigN_itt/Bign_Planned...;
+        %let _DEFAULT_BIGN_IN_DATA = work.adsl_b;
+
+        *UNIQUE SUBJECT IDENTIFIER;
+        %let _DEFAULT_USUBJID = USUBJID; 
+
+        **CUSTOMIZE THE LOOK OF THE COLUMN HEADER;
+        * yes/no trigger to control whether or not to include parentheses -- (N=xx) or N=xx;
+        %let _DEFAULT_TRIGGER_PARENTHESES = YES; 
+        
+        *Format for BigN;
+        %let _DEFAULT_BIGNFMT = 8.;
+
+*** N_PCNT DEFAULTS;
+        ** format to use for dispaly of percentages in counting tables.  For example, 3.0, 5.1, 6.2...;
+        %let _DEFAULT_OUT_N_PCNT_FORMAT = pcnt.;
+        %let _DEFAULT_BLANK_FOR_ZERO_DENOM=yes;
+                
+        * n_pcnt_display_option:
+        *       OPTION 0:  n
+        *       OPTION 1:  n (x.xx[%])
+        *       OPTION 2:  n/N (x.xx[%])
+        *       OPTION 3:  n (x.xx[%]) [xx]
+        *       OPTION 4:  n/N (x.xx[%]) [xx]
+        **;
+        %let _default_n_pcnt_display_option = 1;
+             
+        %LET _DEFAULT_TRIGGER_TIGHT_PAREN = YES;
+        %LET _DEFAULT_TRIGGER_N_SPACE_PCNT = NO;
+        %LET _DEFAULT_TRIGGER_PCNT_SIGN = NO;
+        
+        %LET _DEFAULT_NUDGE = 9;
+
+
+*** SUMMARY STATS DEFAULTS;
+   * STATISTICS;
+   * If any additional stats other than n, Mean, SD, Median, Min and Max, ;
+   * and which can be produced by PROC MEANS, are required in the majority of your tables, ;
+   * then enter them here.  Also make sure to update formats ($VSTATF and $HSTATF) below for these additional stats. ;
+   %let _DEFAULT_SUMM_STATS_ADDITIONAL = ;
+
+
+    *VERTICAL DISPLAYS;
+        *FORMATS;
+        proc format;
+            * The variables listed in the ANALYSIS_VARS parameter of MA_SUMM_STATS will be treated as subcategories ;
+            * beneath each treatment.  Create a format to label each of the variables in the order in which they ;
+            * will appear in that parameter.  That is also the order they will appear in the output;
+            value Vact_cfb
+            1 = "Actual &_default_prcode_split.Value"
+            2 = "Change from&_default_prcode_split.Baseline [1]"
+            ; 
+            value Vbac
+            1 = "Baseline&_default_prcode_split.Value"
+            2 = "Actual&_default_prcode_split.Value"
+            3 = "Change From&_default_prcode_split.Baseline [1]"
+            ;
+            value V2act_cfb
+            1 = "Actual &_default_prcode_split.Value"
+            2 = "Change from&_default_prcode_split.Baseline"
+            ; 
+            
+            * NOTSORTED format to control the order of the statistics procduced;
+            * This format will also control the stat_label in the output;
+            * If additional stats are requested above, be sure to include them in this format;
+            value $Vstatf (NOTSORTED)
+            'N'     = 'n'
+            'MSTD'  = 'Mean (SD)'
+            'MED'   = 'Median'
+            'MINMAX'= 'Min, Max'
+            ;
+			value $Vstatft (NOTSORTED)
+/*            'N'     = 'n'*/
+            'MSTD'  = 'Mean (SD)'
+            'MED'   = 'Median'
+			'Q1Q3'  = 'Q1, Q3'
+            'MINMAX'= 'Min, Max'
+            ;
+			value $Vstatff (NOTSORTED)
+            'N'     = 'n'
+            'MSTD'  = 'Mean (SD)'
+            'MED'   = 'Median'
+			'Q1Q3'  = 'Q1, Q3'
+            'MINMAX'= 'Min, Max'
+            ;
+        run;
+        
+        * CATEGORY SEQUENCE - The variables listed in the ANALYSIS_VARS parameter of MA_SUMM_STATS will be treated as subcategories ;
+        * beneath each treatment.  Tell MR_REPORT_BASIC the sequence  in which to display them beneath each treatment;
+        * The numbers here should match the start values in the Vact_cfb/Vbac format above.;
+        %let _CAT_SEQUENCE_V = 1 2 ;  /* categories are actual and cfb */
+        * the character used as a separator in compound variables MINMAX, Q1Q3, P10P90 and LCLMUCLM;
+        %let _DEFAULT_SUMM_STAT_SEP = %str(,);
+
+
+    *HORIZONTAL DISPLAYS;
+        ****CUSTOMIZE THE LOOK OF THE TREATMENT ROWS IN HORIZONTAL SUMMARY STATS TABLES;
+        * The macro variable _DEFAULT_TRIGGER_PARENTHESES is defined in the BIGN section above.;
+        * It is also used with this group of options;
+        
+        * Control whether to put extra spaces before BIG N counts to align them from left.;
+        %let _DEFAULT_TRIGGER_L_ALIGN_BIGN = YES; 
+        * Control whether to right align BIG N counts in label column.;
+        %let _DEFAULT_TRIGGER_R_ALIGN_BIGN = YES; 
+       
+
+        *FORMATS;
+        proc format;    
+            * the Actual and CFB are in the position usually reserved for the treatment with the statistics appearing beneath them;
+            value $Hact_cfb
+            '1' = "Actual Value"
+            '2' = "Change From Baseline [1]"
+            ;
+            * NOTSORTED format to control the order of the statistics procduced;
+            * For Horizontal displays, this will control the ordinal designation of the statistics produced;
+            * the statistics columns are treated as subcategories beneath either the actual or CFB heading;
+            value $Hstatf (NOTSORTED)
+            'N'     = 'N'     /* 1 */
+            'MEAN'  = 'MEAN'  /* 2 */
+            'STD'   = 'STD'   /* 3 */
+            'MED'   = 'MED'   /* 4 */
+            'MIN'   = 'MIN'   /* 5 */
+            'MAX'   = 'MAX'   /* 6 */
+            ;
+            * Statistic column header labels for Horizontal display;;
+            * If Change from Baseline is to be displayed, this will need to be a numeric format (treated as subcategory);
+            value stathead
+            1 = 'n'
+            2 = 'Mean'
+            3 = 'SD'
+            4 = 'Median'
+            5 = 'Min'
+            6 = 'Max'
+            ;
+            * If NO Change from Baseline is to be displayed, this will need to be a character format ;
+            value $stathead
+            '1' = 'n'
+            '2' = 'Mean'
+            '3' = 'SD'
+            '4' = 'Median'
+            '5' = 'Min'
+            '6' = 'Max'
+            ;
+        run;
+        * CATEGORY SEQUENCE - The statistics listed in the $HSTATF format above will be treated as subcategories ;
+        * beneath the Actual and CFB headers.  Tell MR_REPORT_BASIC the sequence  in which to display them beneath each header;
+        * The numbers here should match the start values in the $HSTATF format above.;
+        %let _CAT_SEQUENCE_H = 1 2 3 4 5 6;  
+        %let _DEFAULT_STAT_COLHEAD_FMT = stathead;
+        
+        
+        
+    * CHOOSE THE DEFAULTS FOR THE MAJORITY OF THE TABLES;
+        * Actual/CFB labels - Vertical (Vact_cfb.) -or- Horizontal ($Hact_cfb.) ;
+        %let _DEFAULT_ACT_CFB_LABEL_FMT = Vact_cfb;
+        
+        * CATEGORY SEQUENCE - Vertical (categories are actual/cfb) -or- 
+        *  Horizontal (categories are the ordinal designations of the stats themselves);
+        %let _DEFAULT_STAT_SEQUENCE = &_CAT_SEQUENCE_V ;
+        
+        * STAT LABELS- Vertical ($Vstatf.) -or- Horizontal ($Hstatf.)  ;
+        %let _DEFAULT_STAT_LABEL_FMT = $Vstatf.;
+              
+ 
+*** DEFINE MAIN SIDE PROGRAMMING FLAG ;
+%let validation_yn = N; /* This is not a validation program */
+%put >>>> LEAVING ARTZ_DEFAULTS;
+
+%global efficacy_id;
+data _null_;
+	_id="&g_deliverableid.";
+	if index(_id,'t1402') then do;
+	call symput('efficacy_id','1402');
+	end;
+run;
+
+
+%put ***********************************************************************;
+%put **************************** Table Default ****************************;
+%put ***********************************************************************;
+
+%put '***** define col1 width; %bign *****';
+%macro colheader_type(total_display=Yes); 
+  %global total_col_display _default_col1_width_pcnt;
+
+  data adsl_b;
+    set adb.adsl;
+	%process_covbln(spaner=&subgroup.);
+  run;
+
+   ** Column 1 WIDTH - provide percentage of the page that column 1 will use;
+  %if %upcase(&total_display.)=YES %then %do;
+    %let total_col_display = YES;
+    %let _default_col1_width_pcnt=25;
+	
+	%if &cohortn.= %then %do;
+	%ma_bign
+	( in_data = adsl_b
+	, in_where = &popfl.='Y' and covbln^=9
+	, subgroup = &cohortn.
+	);
+	%end;
+	%else %do;
+	%ma_bign
+	( in_data = adsl_b
+	, in_where = &popfl.='Y'
+	, subgroup = &cohortn.
+	, subgroup_preloadfmt = &subgroup_fmt.
+	);
+	%end;
+  %end;
+  %else %if &cohortn.^= %then %do;
+    %let total_col_display = NONE;
+    %let _default_col1_width_pcnt=45;
+
+	%ma_bign
+	( in_data = adsl_b
+	, in_where = &popfl.='Y'
+	, subgroup = &cohortn.
+	, subgroup_preloadfmt = &subgroup_fmt.
+	);
+  %end;
+  %else %if %upcase(&total_display.)=NONE %then %do;
+    %let total_col_display = NONE;
+    %let _default_col1_width_pcnt=45;
+	
+	%ma_bign
+	( in_data = adsl_b
+	, in_where = &popfl.='Y' and covbln^=9
+	, subgroup = &cohortn.
+	);
+
+  %end;
+
+  %if %symexist(g_outtype) ne 0 %then %do;
+  %let _default_col1_width_pcnt=40;
+  %end;
+%mend colheader_type;
+
+%macro wrap_npcnt(indst=n_pcnt,pcnt=pcnt,var=n_pcnt);
+  data n_pcnt;
+    set n_pcnt;
+    if ^missing(&pcnt.) then &var.=tranwrd(&var.,'(',"&_default_escapechar.n(");
+  run;
+%mend wrap_npcnt;
+
+*** used after mr_pack macro aimed to adjust pagenum;
+%macro linect;
+data MR_PACK;
+    set MR_PACK;
+	if index(pack_col1,"&_default_escapechar.n")=0 then linect = linect + 1;
+run;
+proc sort data=mr_pack; by &sort_order.; run;
+%mend;
+
+
+%macro update_section_(sec=_section_);
+	%if &cohortn.^= %then %do; _section_ = &cohortn.*10000+&sec.; %end;
+	%else %do; _section_ = &sec.; %end;
+%mend update_section_;
+
+
+%macro dis_zero(andw=);
+	array adzero n_pcnt_:;
+	do i = 1 to dim(adzero);
+		if compress(adzero(i)) in ('' '0') &andw. and index(col1,'Mean')=0 and index(col1,'Median')=0 and 
+			index(compress(col1),'Q1,Q3')=0 and index(compress(col1),'Min,Max')=0 then adzero(i) = "0&_default_escapechar.n";
+	end;
+
+	%if %upcase(&total_col_display.)=NONE %then %do;
+	do i = 1 to dim(adzero); adzero(i) = tranwrd(adzero(i),"0&_default_escapechar.n",'0'); end;
+	%end;
+%mend dis_zero;
+
+%macro subtitle(subt=Y,use_parse_char=Y);
+%if &subgroup^= and &subt.=Y %then %do;
+%mr_subgroup_title(subgroup = &cohortn.,subgroup_title=&subtit_agegn.,num_skip_lines=1,use_parse_char=&use_parse_char.);
+%end;
+%mend subtitle;
+
+%macro inreport_final(in=final);
+	%if %symexist(pagenum)=0 %then %do;
+		%let pagenum = pagenum;
+	%end;
+
+	%if %symexist(bign)=0 %then %do;
+		%let bign = bign;
+	%end;
+
+	data &in.;
+		set &in.;
+		pack_col1=tranwrd(pack_col1,'[1]',"&_default_escapechar.{super a}");
+		pack_col1=tranwrd(pack_col1,'[2]',"&_default_escapechar.{super b}");
+		pack_col1=tranwrd(pack_col1,'[3]',"&_default_escapechar.{super c}");
+		pack_col1=tranwrd(pack_col1,'[4]',"&_default_escapechar.{super d}");
+		pack_col1=tranwrd(pack_col1,'[5]',"&_default_escapechar.{super e}");
+		pack_col1=tranwrd(pack_col1,'[6]',"&_default_escapechar.{super f}");
+		pack_col1=tranwrd(pack_col1,'[7]',"&_default_escapechar.{super g}");
+		pack_col1=tranwrd(pack_col1,"n&_default_escapechar.n (%)","&_default_escapechar.n n (%)");
+		&pagenum.=1;
+	run;
+		
+	data _null_;
+	    set &bign.;
+	    call symput(compress('COLHEAD'||bign_index),colhead);
+
+		%if &cohortn.= %then %do;
+	    call symput(compress('COLHEAD_'||&_default_trtvar.),colhead);
+	    %end;
+		%else %do;
+	    call symput(compress('COLHEAD_'||put(&cohortn.,best.)||&_default_trtvar.),colhead);
+		%end;
+  	run;
+%mend inreport_final;
+
+
+%macro report_table
+	(in=final,bign=bign,column1_label=blank,pagenum=pagenum,skip_var=_section_
+	,bygroup=,bygrpyn=,subgroup=,subgrpyn=
+	,trt_sequence=61 62 699 71 72 799 91 92 999
+	,headerA=
+	,MissingPage=Yes
+	,Overall=No
+	,MisCol=N
+	,partb_head=);
+
+
+	%if %symexist(g_outtype) ne 0 %then %do;
+		%inreport_final;
+	%end;
+		
+	data _null_;
+	    set &bign.;
+	    call symput(compress('COLHEAD'||bign_index),colhead);
+
+		%if &cohortn.= %then %do;
+	    call symput(compress('COLHEAD_'||&_default_trtvar.),colhead);
+	    %end;
+		%else %do;
+	    call symput(compress('COLHEAD_'||put(&cohortn.,best.)||&_default_trtvar.),colhead);
+		%end;
+  	run;
+
+
+%if %upcase(&total_col_display.)=YES %then %do;
+  data final;
+    set &in.;
+    array _npcnt $200 n_pcnt_0 n_pcnt_60 n_pcnt_70 n_pcnt_80 n_pcnt_990 
+		n_pcnt_8 n_pcnt_68 n_pcnt_78 n_pcnt_88 n_pcnt_998;
+
+	%if &cohortn.^= %then %do;
+	if (compress(scan(n_pcnt_999,2))=:'0' or index(n_pcnt_999,'(100)')) 
+		and compress(col1)='Missing' then delete;%end;
+	%else %if &cohortn.= %then %do; 
+	if (compress(scan(n_pcnt_99,2))=:'0' or index(n_pcnt_99,'(100)')) 
+		and compress(col1)='Missing' then delete;%end;		
+  run;
+  proc sort data=final(drop=n_pcnt_0: n_pcnt_60: n_pcnt_70: n_pcnt_80: 
+							n_pcnt_8: n_pcnt_68: n_pcnt_78: n_pcnt_88:
+							n_pcnt_990 n_pcnt_998 
+	%if &headerA.=noTotal %then %do; n_pcnt_699 n_pcnt_799 n_pcnt_999 %end;
+	%if &headerA.=noOverTotal and &partb_head.= %then %do; n_pcnt_9: n_pcnt_699 n_pcnt_799 %end;
+	%if &partb_head.=Yes %then %do; n_pcnt_9: %end;); 
+    by &sort_order.; 
+  run;
+
+
+  ** Basic proc report ;
+  ** below is Part B;
+  %if &partb_head.=Yes %then %do;
+	  %mr_report_basic
+	  (in_data                = final 
+	  ,original_in_data		  = subset
+	  ,original_where         = &popfl.='Y'
+	  ,pagenum                = &pagenum.
+	  ,column1                = pack_col1
+	  ,column1_label          = &column1_label.
+	  ,col1_width_pcnt        = &_default_col1_width_pcnt. 
+	  ,trt_col_root           = n_pcnt_
+	  ,just                   = L 
+	  ,vjust          		  = TOP
+	  ,skip_var               = &skip_var.
+	  ,prcode_split           = &_default_prcode_split.
+	  ,no_subjects_text       = &_default_no_subjects_table.
+	  ,skip_line_cell_height  = &_DEFAULT_SKIP_LINE_CELL_HEIGHT.
+	  %if %upcase(&bygrpyn.) eq Y %then %do;
+	  ,bygroup                = &bygroup.
+	  %end;
+  	  %if &glospaner.=agegn %then %do;
+		  , span_col_header = >=18 and <65 Years ! >=65 Years 
+		  , span_col_header_uline = Y ! Y 
+		  , span_col_header_ststp = 61 699 ! 71 799
+		  , interleave_trt_sequence = &trt_sequence.
+	  %end;
+	  %else %if &glospaner.=scovbl %then %do;
+		  , span_col_header = Baseline SARS-CoV-2 Negative ! Baseline SARS-CoV-2 Positive 
+		  , span_col_header_uline = Y ! Y 
+		  , span_col_header_ststp = 61 699 ! 71 799
+		  , interleave_trt_sequence = &trt_sequence.
+	  %end;
+  	  );
+  %end;
+
+
+  ** below is Part A;
+  %if &partb_head.= %then %do;
+	  %mr_report_basic
+	  (in_data                = final 
+	  ,original_in_data		  = subset
+	  ,original_where         = &popfl.='Y'
+	  ,pagenum                = &pagenum.
+	  ,column1                = pack_col1
+	  ,column1_label          = &column1_label.
+	  ,col1_width_pcnt        = &_default_col1_width_pcnt. 
+	  ,trt_col_root           = n_pcnt_
+	  ,just                   = L 
+	  ,vjust          		  = TOP
+	  ,skip_var               = &skip_var.
+	  ,prcode_split           = &_default_prcode_split.
+	  ,no_subjects_text       = &_default_no_subjects_table.
+	  ,skip_line_cell_height  = &_DEFAULT_SKIP_LINE_CELL_HEIGHT.
+	  %if %upcase(&bygrpyn.) eq Y %then %do;
+	  ,bygroup                = &bygroup.
+	  %end;
+	  %if &glospaner.=agegn %then %do;
+		  , span_col_header    = >=18 and <65 Years ! >=65 Years ! Overall
+		  , span_col_header_uline = Y ! Y ! Y
+		  %if &headerA.=noTotal %then %do; , span_col_header_ststp=61 62 ! 71 72 ! 91 92 %end;
+		  %else %do; , span_col_header_ststp=61 699 ! 71 799 ! 91 999 %end;
+	  %end;
+	  %else %if &glospaner.=saran and &headerA.=noOverTotal %then %do;
+		  , span_col_header    = Vaccination 1 ! Vaccination 2
+		  , span_col_header_uline = Y ! Y 
+		  , span_col_header_ststp=61 62 ! 71 72 
+	  %end;
+	  %else %do;
+		  , span_col_header    = Baseline SARS-CoV-2 Negative ! Baseline SARS-CoV-2 Positive ! Overall 
+		  , span_col_header_uline = Y ! Y ! Y
+		  %if &headerA.=noTotal %then %do; , span_col_header_ststp=61 62 ! 71 72 ! 91 92 %end;
+		  %else %do; , span_col_header_ststp=61 699 ! 71 799 ! 91 999 %end;
+	  %end;
+	  
+	  %if &headerA.=noTotal %then %do; , INTERLEAVE_TRT_SEQUENCE = 61 62 71 72 91 92 %end;
+	  %else %if &headerA.=noOverTotal %then %do; , INTERLEAVE_TRT_SEQUENCE = 61 62 71 72 %end;
+	  %else %do; , INTERLEAVE_TRT_SEQUENCE = &trt_sequence. %end;   
+  	  );
+  %end;
+%end;
+
+
+
+
+%else %if %upcase(&total_col_display.)=NONE %then %do;
+%if &subgroup.^= %then %do; 
+  %let display = Y; 
+  proc sql noprint; select count(*) into:_grpn_ from subset where &subgroup. in (0 8 88); quit;
+  %if &_grpn_.=0 %then %do; %let display = N; %end;
+  %put "Alert_A: Mising Group display Yes or No: &display.";
+%end;
+  
+  
+  data final;
+    set &in.;
+    array _npcnt $200 n_pcnt_1 n_pcnt_2 n_pcnt_0 n_pcnt_8 n_pcnt_99;
+	if (compress(scan(n_pcnt_99,2))=:'0' or index(n_pcnt_99,'(100)')) and compress(col1)='Missing' then delete;
+
+	%if &subgroup.^= %then %do; 
+        %if &display.=N %then %do;
+		if &subgroup. in (0 8 88) then delete;
+	%end;
+
+		%if &Overall.=No %then %do;if &subgroup. in (9) then delete;%end;
+		%else %do; if &subgroup. in (9) then _ord=0; else _ord=1;%end;
+
+		%if &MissingPage.=No %then %do;
+			if not (&subgroup. in (0 8 88));
+		%end;
+	%end;
+  run;
+  proc sort data=final(drop=n_pcnt_0:
+		%if &MisCol.=N %then %do; n_pcnt_8: n_pcnt_8 %end;
+		%if &efficacy_id.=1402 and &headerA.= %then %do; n_pcnt_9: %end;); 
+    by &sort_order.; 
+  run;
+
+  
+  %if &Overall.^=No %then %do; 
+  proc sql;
+	create table subgroup_order_data_set as
+    select distinct &subgroup.,_ord from final order by _ord;
+  quit;
+  %end;
+  %if %upcase(&subgrpyn.) eq Y and &Overall.=No %then %do; 
+  proc sql;
+	create table subgroup_order_data_set as
+    select distinct &subgroup. from final;
+  quit;
+  %end;
+ 
+  ** Basic proc report ;
+  %mr_report_basic
+  (in_data                = final 
+  ,original_in_data    	  = subset
+  ,original_where         = &popfl.='Y'
+  ,pagenum                = &pagenum.
+  ,column1                = pack_col1
+  ,column1_label          = &column1_label.
+  ,col1_width_pcnt        = &_default_col1_width_pcnt. 
+  ,trt_col_root           = n_pcnt_
+  ,just                   = L 
+  ,vjust          		  = TOP
+  ,skip_var               = _section_
+  ,prcode_split           = &_default_prcode_split.
+  ,skip_line_cell_height  = &_DEFAULT_SKIP_LINE_CELL_HEIGHT.
+  %if %upcase(&bygrpyn.) eq Y %then %do;
+  ,bygroup                = &bygroup.
+  %end;
+  %if %upcase(&subgrpyn.) eq Y %then %do;
+  ,subgroup                = &subgroup.
+  ,subgroup_order_data_set = subgroup_order_data_set  
+  ,no_subjects_text       = &_default_no_subjects_subset.
+  %end;
+  %else %do;
+  ,no_subjects_text       = &_default_no_subjects_table.
+  %end;
+  %if &trt_sequence. eq Y %then %do;
+  ,interleave_trt_sequence = &_default_interleave_trt_sequence.
+  %end;
+  );
+%end;
+%mend report_table;
+
+
+
+
+
+%put ***********************************************************************;
+%put *************************** Listing Default ***************************;
+%put ***********************************************************************;
+
+%macro parseTF;
+%global nfooter;
+%global title3;
+%local title4;
+%local title5;
+%local title6;
+
+%if &g_pgmname. eq l1602060205 or  &g_pgmname. eq l1602073102 %then %do;
+  %get_tf
+  	 (  tlf_progname = &get_tf_id. 
+  	  , escapechar = &_default_escapechar.
+  	  , write_footnotes = Yes
+  	 );
+
+  data _null_;
+    set &g_pgmname._TF end=_end_;
+    if _end_ then call symputx('nfooter', _seq);
+  run;
+
+  %do i = 1 %to &nfooter;
+    %global footnote&i;
+  %end;
+
+%end;
+
+data _null_;
+  set &g_pgmname._TF;
+  where upcase(_progid)=upcase("&g_pgmname");
+  _tftext1 = scan(_tftext1, 1, """");
+  call symputx(cats(lowcase(_torf), _seq), _tftext1);
+run;
+
+%let title3 = %str(%bquote(&title4.) %bquote(&title5.) %bquote(&title6.));
+%mend parseTF;
+
+%macro special_char(indset=,invar=);
+	%CLN_CARRIAGE(libin=work,selmems=&indset.,selvars=&invar.,enhanced=Y,
+		from='090d0a0cC2B0A07B7D5C808C9DE2939989A5C388'x,to='2020202020202020202020202020202020202020'x);
+%mend special_char;
+
+%macro basetype(base_type=serostatus,popfl=saffl,trtn=trt01an);
+	%global basetype _default_subgroup _default_subgroup_title bign0 bign1 bign2;
+    %let basetype = &base_type.;
+    %let _default_subgroup = DEV_SERO;
+    %let _default_subgroup_title = ;
+
+
+	%let bign0=%nrstr(Missing (N=0));
+	%let bign1=%nrstr(Placebo (N=0));
+	%let bign2=%nrstr(mRNA-1273 (N=0));
+	proc sql noprint;
+		select 'Missing (N='||compress(put(count(distinct usubjid),best.))||')' into:bign0 
+		from adb.adsl where &popfl.='Y' and missing(&trtn.);
+
+		select 'Placebo (N='||compress(put(count(distinct usubjid),best.))||')' into:bign1 
+		from adb.adsl where &popfl.='Y' and &trtn.=1;
+
+		select 'mRNA-1273 (N='||compress(put(count(distinct usubjid),best.))||')' into:bign2 
+		from adb.adsl where &popfl.='Y' and &trtn.=1;
+	quit;
+%mend basetype;
+
+
+%macro subjectID(outvar=,rskf=);
+  if ^missing(RACESPY) then DEV_SUBJECT = 'Subject ID: '||strip(subjid)||'; Age (years): '||
+    strip(put(age,best.))||'; Sex: '||strip(sex)||'; Race: '||strip(RACE)||
+    ': '||RACESPY;
+  else DEV_SUBJECT = 'Subject ID: '||strip(subjid)||'; Age (years): '||
+    strip(put(age,best.))||'; Sex: '||strip(sex)||'; Race: '||strip(RACE);
+	
+  DEV_SUBJECT = tranwrd(DEV_SUBJECT,': :',':');
+
+  %if &rskf.=Y %then %do;
+    length rskf $200;
+
+    if rskf1='Chronic Lung Disease' then rskf_a='CL';
+    if rskf2='Significant Cardiac Disease' then rskf_b='SC';
+    if rskf3='Severe Obesity' then rskf_c='SO';
+    if rskf4='Diabetes' then rskf_d='D';
+    if rskf5='Liver Disease' then rskf_e='L';
+    if rskf6='Human Immunodeficiency Virus Infection' then rskf_f='H';
+	rskf=catx('/',rskf_a,rskf_b,rskf_c,rskf_d,rskf_e,rskf_f);
+	
+    DEV_SUBJECT=STRIP(DEV_SUBJECT)||"; &_default_escapechar.nRisk Factors for Severe COVID-19[4]: "||STRIP(RSKF);
+  %end;
+%mend subjectID;
+
+
+** use listing subgroup macro to create missing group;
+%macro l_subgroup(trtA_P=,outvar=);
+  ** by serostatus;
+  %if &basetype.=serostatus %then %do;
+    if SCOV2BL='' and (TRT&trtA_P.N=. or TRT&trtA_P.N=8)  then &outvar. = '1';
+    else if SCOV2BL='' and TRT&trtA_P.N=1 then &outvar. = '2';
+    else if SCOV2BL='' and TRT&trtA_P.N=2 then &outvar. = '3';
+    else if SCOV2BL='Negative' and (TRT&trtA_P.N=. or TRT&trtA_P.N=8) then &outvar. = '4';
+    else if SCOV2BL='Positive' and (TRT&trtA_P.N=. or TRT&trtA_P.N=8) then &outvar. = '5';
+    else if SCOV2BL='Negative' and TRT&trtA_P.N=1 then &outvar. = '6';
+    else if SCOV2BL='Negative' and TRT&trtA_P.N=2 then &outvar. = '7';
+    else if SCOV2BL='Positive' and TRT&trtA_P.N=1 then &outvar. = '8';
+    else if SCOV2BL='Positive' and TRT&trtA_P.N=2 then &outvar. = '9';
+  %end;
+  
+  ** by treatment;
+  %if &basetype.=treatment %then %do;
+    if (TRT&trtA_P.N=. or TRT&trtA_P.N=8)  then &outvar. = '1';
+    else if TRT&trtA_P.N=1 then &outvar. = '2';
+    else if TRT&trtA_P.N=2 then &outvar. = '3';
+  %end;
+  %if &basetype.=treatment_seq %then %do;
+    if (TRT&trtA_P.N=. or TRT&trtA_P.N=8)  then &outvar. = '1';
+    else if TRT&trtA_P.N=1 then &outvar. = '2';
+    else if TRT&trtA_P.N=2 then &outvar. = '3';
+    else if TRT&trtA_P.N=3 then &outvar. = '4';
+  %end;
+  %if &basetype.=stratum %then %do;
+    if stratarn=.  then &outvar. = '1';
+    else if stratarn=1 then &outvar. = '2';
+    else if stratarn=2 then &outvar. = '3';
+	else if stratarn=3 then &outvar. = '4';
+  %end;
+  %if &basetype.=stratumtrt %then %do;
+    if stratarn=. and (TRT&trtA_P.N=. or TRT&trtA_P.N=8)  then &outvar. = '1';
+    else if stratarn=. and TRT&trtA_P.N=1 then &outvar. = '2';
+    else if stratarn=. and TRT&trtA_P.N=2 then &outvar. = '3';
+    else if stratarn=1 and (TRT&trtA_P.N=. or TRT&trtA_P.N=8) then &outvar. = '4';
+    else if stratarn=2 and (TRT&trtA_P.N=. or TRT&trtA_P.N=8) then &outvar. = '5';
+    else if stratarn=3 and (TRT&trtA_P.N=. or TRT&trtA_P.N=8) then &outvar. = '6';
+    else if stratarn=1 and TRT&trtA_P.N=1 then &outvar. = '7';
+    else if stratarn=2 and TRT&trtA_P.N=1 then &outvar. = '8';
+    else if stratarn=3 and TRT&trtA_P.N=1 then &outvar. = '9';
+	else if stratarn=1 and TRT&trtA_P.N=2 then &outvar. = '10';
+    else if stratarn=2 and TRT&trtA_P.N=2 then &outvar. = '11';
+    else if stratarn=3 and TRT&trtA_P.N=2 then &outvar. = '12';
+  %end;
+  %if &basetype.=trtage %then %do;
+    if trt01an = 1 and 18 <= age <= 25 then &outvar. = '1';
+	else if trt01an = 2 and 18 <= age <= 25 then &outvar. = '2';
+	else if trt01an = 1 and 26 <= age <= 50 then &outvar. = '3';
+	else if trt01an = 2 and 26 <= age <= 50 then &outvar. = '4';
+  %end ;
+%mend l_subgroup;
+
+
+%macro miss_subtitle;
+  proc sql noprint;
+	select count(*) into:redn from &in_data. where &_default_subgroup.="&rpn.";
+  quit;
+  %put "Alert_A: subgroup/subtitle basetype=&basetype. &rpn. counts records as &redn.";
+
+  %if &redn^=0 %then %do;
+  PROC REPORT data=&in_data. nowd missing spacing=0 split="&_default_prcode_split." style(report)=[outputwidth=100%];
+    where &_default_subgroup.="&rpn.";
+    column pagenum &_varlist.;
+    define pagenum / order order=internal noprint;
+
+    %do i=1 %to &_maxnum.;
+    define &&var&i.. / "&&labe&i.." &&usage&i.. &&op&i.. style(header)={&&styhed&i.. asis=on} style(column)={&&stycol&i.. vjust=t asis=on cellwidth=&&widp&i..%};
+
+    %if &&skp&i..^= %then %do;
+    compute after &&var&i.. / style={cellheight=&_DEFAULT_SKIP_LINE_CELL_HEIGHT.};
+    line " ";
+    endcomp;
+    %end;
+    %end;
+
+    %if &subid.^= %then %do;
+    compute before &subid. / style={cellheight=&cellheight. just=l};
+    line &subid. $2000.;
+    endcomp;
+    %end;
+
+    compute before pagenum /style={cellheight=&_DEFAULT_SKIP_LINE_CELL_HEIGHT.};
+    line " ";
+    endcomp;
+
+    break after pagenum / page;
+    run;
+   %end;
+%mend miss_subtitle;
+
+%macro full_subtitle;
+  proc sql noprint;
+    select count(*) into:redn from &in_data. where &_default_subgroup.="&rpn.";
+  quit;
+  %put "Alert_A: subgroup/subtitle basetype=&basetype. &rpn. counts records as &redn.";
+
+  %if &redn=0 %then %do; /* below part is for no data to be reproted */
+  data no_report;
+    array _dummy $2000 &_varname.;
+    
+    pagenum=%eval(&rpn.); output;
+    pagenum=%eval(&rpn.)+1; 
+    &var1. = "&_default_no_subjects_subset."; output;
+  run;
+  proc sort data=no_report; by pagenum &_varname.; run; 
+
+  PROC REPORT data=no_report nowd missing spacing=0 split="&_default_prcode_split." style(report)=[outputwidth=100%];
+    column pagenum &_varname.;
+    define pagenum / order order=internal noprint;
+
+    %do i=1 %to &_maxnum.;
+    define &&var&i.. / "&&labe&i.." &&usage&i.. &&op&i.. style(header)={&&styhed&i.. asis=on} style(column)={&&stycol&i.. vjust=t asis=on cellwidth=&&widp&i..%};
+    %end;
+
+    compute after &var1. /style={cellheight=&_DEFAULT_SKIP_LINE_CELL_HEIGHT.};
+    line &var1. $2000.;
+    endcomp;
+
+    compute before pagenum /style={cellheight=&_DEFAULT_SKIP_LINE_CELL_HEIGHT.};
+    line " ";
+    endcomp;
+  run;
+  %end;
+
+  %else %if &redn^=0 %then %do; /* below part is for full data to report */
+  PROC REPORT data=&in_data. nowd missing spacing=0 split="&_default_prcode_split." style(report)=[outputwidth=100%];
+    where &_default_subgroup.="&rpn.";
+    column pagenum &_varlist.;
+    define pagenum / order order=internal noprint;
+
+    %do i=1 %to &_maxnum.;
+    define &&var&i.. / "&&labe&i.." &&usage&i.. &&op&i.. style(header)={&&styhed&i.. asis=on} style(column)={&&stycol&i.. vjust=t asis=on cellwidth=&&widp&i..%};
+
+    %if &&skp&i..^= %then %do;
+    compute after &&var&i.. / style={cellheight=&_DEFAULT_SKIP_LINE_CELL_HEIGHT.};
+    line " ";
+    endcomp;
+    %end;
+    %end;
+
+    %if &subid.^= %then %do;
+    compute before &subid. / style={cellheight=&cellheight. just=l};
+    line &subid. $2000.;
+    endcomp;
+    %end;
+
+    compute before pagenum /style={cellheight=&_DEFAULT_SKIP_LINE_CELL_HEIGHT.};
+    line " ";
+    endcomp;
+
+    break after pagenum / page;
+  run;
+  %end;
+%mend full_subtitle;
+
+
+
+
+%macro ml_report_update(in_data=,subid=,cellheight=&_DEFAULT_SKIP_LINE_CELL_HEIGHT.);
+proc sort data=meta_data; by Spanning_Header varnum; run;
+data meta_data;
+	length spaner_var $2000;
+	set meta_data;
+	by Spanning_Header VarNum;
+
+	if first.spanning_header and ^missing(spanning_header) then spaner_var='("'||
+		strip(spanning_header)||" ^R/RTF'\brdrb\brdrs\li100\ri100'"||'" '||var;
+	if last.spanning_header and ^missing(spanning_header) then spaner_var=strip(var)||')';
+	if missing(spaner_var) then spaner_var=var;
+
+	if var=label then label='';
+run;
+
+proc sort data=meta_data; by varnum; run;
+
+data _null;
+  length _varlist _varname $2000;
+  set meta_data end=eof;
+  by varnum;
+
+  if usage='BY' then do; usage = 'ORDER'; options = 'NOPRINT  ORDER=INTERNAL'; end;
+  if missing(Width_pct_char) then Width_pct_char = '0';
+
+  retain _varlist _varname;
+  if varnum=1 then _varlist=spaner_var;
+  else _varlist=catx(' ',_varlist,spaner_var);
+  if eof then do;
+    call symput('_varlist',_varlist);
+    call symput('_maxnum',put(varnum,best.));
+  end;
+  
+  if varnum=1 then _varname=var;
+  else _varname=catx(' ',_varname,var);
+  if eof then call symput('_varname',_varname);
+  
+
+  call symput(compress('var'||put(varnum,best.)),var);
+  call symput(compress('usage'||put(varnum,best.)),scan(usage,1));
+  call symput(compress('op'||put(varnum,best.)),options);
+  call symput(compress('labe'||put(varnum,best.)),strip(label));
+  call symput(compress('widp'||put(varnum,best.)),Width_pct_char);
+  call symput(compress('stycol'||put(varnum,best.)),style_column);
+  call symput(compress('styhed'||put(varnum,best.)),style_header);
+  call symput(compress('skp'||put(varnum,best.)),put(skip,best.));
+run;
+%*put &_varlist. &_maxnum. &var1. &var3.;
+
+proc sql noprint;
+  select compress(put(max(_seq),best.)) into:_seq from &GET_TF_ID._TF where _torf='Title';
+quit;
+
+
+** by serostatus;
+%if &basetype.=serostatus %then %do;
+  title%eval(&_seq.+1) ' ';
+  %do rpn=1 %to 5;
+  %if &rpn.=1 %then %do; title%eval(&_seq.+2) justify = left 'Baseline SARS-CoV-2 Status: Missing; Treatment Group: Missing'; %end;
+  %if &rpn.=2 %then %do; title%eval(&_seq.+2) justify = left 'Baseline SARS-CoV-2 Status: Missing; Treatment Group: Placebo'; %end;
+  %if &rpn.=3 %then %do; title%eval(&_seq.+2) justify = left 'Baseline SARS-CoV-2 Status: Missing; Treatment Group: mRNA-1273'; %end;
+  %if &rpn.=4 %then %do; title%eval(&_seq.+2) justify = left 'Baseline SARS-CoV-2 Status: Negative; Treatment Group: Missing'; %end;
+  %if &rpn.=5 %then %do; title%eval(&_seq.+2) justify = left 'Baseline SARS-CoV-2 Status: Positive; Treatment Group: Missing'; %end;
+  %miss_subtitle;
+  %end;
+
+  title%eval(&_seq.+1) ' ';
+  %do rpn=6 %to 9;
+  %if &rpn.=6 %then %do; title%eval(&_seq.+2) justify = left 'Baseline SARS-CoV-2 Status: Negative; Treatment Group: Placebo'; %end;
+  %if &rpn.=7 %then %do; title%eval(&_seq.+2) justify = left 'Baseline SARS-CoV-2 Status: Negative; Treatment Group: mRNA-1273'; %end;
+  %if &rpn.=8 %then %do; title%eval(&_seq.+2) justify = left 'Baseline SARS-CoV-2 Status: Positive; Treatment Group: Placebo'; %end;
+  %if &rpn.=9 %then %do; title%eval(&_seq.+2) justify = left 'Baseline SARS-CoV-2 Status: Positive; Treatment Group: mRNA-1273'; %end;
+  %full_subtitle;
+  %end;
+%end;
+
+** by treatment;
+%if &basetype.=treatment %then %do;
+  title%eval(&_seq.+1) ' ';
+  %do rpn=1 %to 1;
+  %if &rpn.=1 %then %do; title%eval(&_seq.+2) justify = left "Treatment Group: Missing"; %end; /*&bign0.*/
+  %miss_subtitle;
+  %end;
+
+  title%eval(&_seq.+1) ' ';
+  %do rpn=2 %to 3;
+  %if &rpn.=2 %then %do; title%eval(&_seq.+2) justify = left "Treatment Group: Placebo"; %end; /*&bign1.*/
+  %if &rpn.=3 %then %do; title%eval(&_seq.+2) justify = left "Treatment Group: mRNA-1273"; %end; /*&bign2.*/
+  %full_subtitle;
+  %end;
+%end;
+
+** by treatment and AgeGroup;
+%if &basetype.=trtage %then %do;
+   title%eval(&_seq.+1) ' ';
+  %do rpn=1 %to 4;
+  %if &rpn.=1 %then %do; title%eval(&_seq.+2) justify = left "Age Group: >=18 and <=25 Years; Treatment Group: Placebo"; %end; /*&bign1.*/
+  %if &rpn.=2 %then %do; title%eval(&_seq.+2) justify = left "Age Group: >=18 and <=25 Years; Treatment Group: mRNA-1273"; %end; /*&bign2.*/
+  %if &rpn.=3 %then %do; title%eval(&_seq.+2) justify = left "Age Group: >=26 and <=50 Years; Treatment Group: Placebo"; %end; /*&bign2.*/
+  %if &rpn.=4 %then %do; title%eval(&_seq.+2) justify = left "Age Group: >=26 and <=50 Years; Treatment Group: mRNA-1273"; %end; /*&bign2.*/
+  %full_subtitle;
+  %end;
+%end;
+%if &basetype.=treatment_seq %then %do;
+  title%eval(&_seq.+1) ' ';
+  %do rpn=1 %to 1;
+  %if &rpn.=1 %then %do; title%eval(&_seq.+2) justify = left "Treatment Group: Missing"; %end; 
+  %miss_subtitle;
+  %end;
+
+  title%eval(&_seq.+1) ' ';
+  %do rpn=2 %to 4;
+  %if &rpn.=2 %then %do; title%eval(&_seq.+2) justify = left "Treatment Group: Placebo"; %end; 
+  %if &rpn.=3 %then %do; title%eval(&_seq.+2) justify = left "Treatment Group: Placebo-mRNA-1273"; %end; 
+  %if &rpn.=4 %then %do; title%eval(&_seq.+2) justify = left "Treatment Group: mRNA-1273"; %end; 
+  %full_subtitle;
+  %end;
+%end;
+
+** by randomization stratum;
+%if &basetype.=stratum %then %do;
+  title%eval(&_seq.+1) ' ';
+  %do rpn=1 %to 1;
+  %if &rpn.=1 %then %do; title%eval(&_seq.+2) justify = left "Randomization Stratum: Missing"; %end; 
+  %miss_subtitle;
+  %end;
+
+  title%eval(&_seq.+1) ' ';
+  %do rpn=2 %to 4;
+  %if &rpn.=2 %then %do; title%eval(&_seq.+2) justify = left "Randomization Stratum: >=18 and <65 Years and Not at Risk"; %end; 
+  %if &rpn.=3 %then %do; title%eval(&_seq.+2) justify = left "Randomization Stratum: >=18 and <65 Years and at Risk"; %end;  
+  %if &rpn.=4 %then %do; title%eval(&_seq.+2) justify = left "Randomization Stratum: >=65 Years"; %end; 
+  %full_subtitle;
+  %end;
+%end;
+%if &basetype.=stratumtrt %then %do;
+  title%eval(&_seq.+1) ' ';
+  %do rpn=1 %to 6;
+  %if &rpn.=1 %then %do; title%eval(&_seq.+2) justify = left 'Randomization Stratum: Missing; Treatment Group: Missing'; %end;
+  %if &rpn.=2 %then %do; title%eval(&_seq.+2) justify = left 'Randomization Stratum: Missing; Treatment Group: Placebo'; %end;
+  %if &rpn.=3 %then %do; title%eval(&_seq.+2) justify = left 'Randomization Stratum: Missing; Treatment Group: mRNA-1273'; %end;
+  %if &rpn.=4 %then %do; title%eval(&_seq.+2) justify = left 'Randomization Stratum: >=18 and <65 Years and Not at Risk; Treatment Group: Missing'; %end;
+  %if &rpn.=5 %then %do; title%eval(&_seq.+2) justify = left 'Randomization Stratum: >=18 and <65 Years and at Risk; Treatment Group: Missing'; %end;
+  %if &rpn.=6 %then %do; title%eval(&_seq.+2) justify = left 'Randomization Stratum: >=65 Years; Treatment Group: Missing'; %end;
+  %miss_subtitle;
+  %end;
+
+  title%eval(&_seq.+1) ' ';
+  %do rpn=7 %to 12;
+  %if &rpn.=7 %then %do; title%eval(&_seq.+2) justify = left 'Randomization Stratum: >=18 and <65 Years and Not at Risk; Treatment Group: Placebo'; %end;
+  %if &rpn.=8 %then %do; title%eval(&_seq.+2) justify = left 'Randomization Stratum: >=18 and <65 Years and at Risk; Treatment Group: Placebo'; %end;
+  %if &rpn.=9 %then %do; title%eval(&_seq.+2) justify = left 'Randomization Stratum: >=65 Years; Treatment Group: Placebo'; %end;
+  %if &rpn.=10 %then %do; title%eval(&_seq.+2) justify = left 'Randomization Stratum: >=18 and <65 Years and Not at Risk; Treatment Group: mRNA-1273'; %end;
+  %if &rpn.=11 %then %do; title%eval(&_seq.+2) justify = left 'Randomization Stratum: >=18 and <65 Years and at Risk; Treatment Group: mRNA-1273'; %end;
+  %if &rpn.=12 %then %do; title%eval(&_seq.+2) justify = left 'Randomization Stratum: >=65 Years; Treatment Group: mRNA-1273'; %end;
+  %full_subtitle;
+  %end;
+%end;
+
+
+** No subtitle in output;
+%if &basetype.=none %then %do;
+	PROC REPORT data=&in_data. nowd missing spacing=0 split="&_default_prcode_split." style(report)=[outputwidth=100%];
+    column pagenum &_varlist.;
+    define pagenum / order order=internal noprint;
+
+    %do i=1 %to &_maxnum.;
+    define &&var&i.. / "&&labe&i.." &&usage&i.. &&op&i.. style(header)={&&styhed&i.. asis=on} style(column)={&&stycol&i.. vjust=t asis=on cellwidth=&&widp&i..%};
+
+    %if &&skp&i..^= %then %do;
+    compute after &&var&i.. / style={cellheight=&_DEFAULT_SKIP_LINE_CELL_HEIGHT.};
+    line " ";
+    endcomp;
+    %end;
+    %end;
+
+    %if &subid.^= %then %do;
+    compute before &subid. / style={cellheight=&cellheight. just=l};
+    line &subid. $2000.;
+    endcomp;
+    %end;
+
+    compute before pagenum /style={cellheight=&_DEFAULT_SKIP_LINE_CELL_HEIGHT.};
+    line " ";
+    endcomp;
+
+    break after pagenum / page;
+  run;
+%end;
+%mend ml_report_update;

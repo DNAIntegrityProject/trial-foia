@@ -1,0 +1,416 @@
+************************************************************************
+*        CLIENT:  ModernaTX, Inc.
+*      PROTOCOL:  mRNA-1273-P201
+*   	PURPOSE:  Produce adarsum dataset
+*
+*   INPUT FILES:  adb.adar and adb.adae
+*  OUTPUT FILES:  adb.adarsum
+*
+*   USAGE NOTES:   
+*
+*************************************************************************
+*  © 2020 PPD
+*  All Rights Reserved.
+*************************************************************************;
+
+proc datasets mt=data lib=work kill nolist; 
+quit; 
+dm 'clear log; clear output';
+
+%include "madam.sas";
+data adar; 
+	set adb.adar;
+run;
+
+proc freq data=adar; where paramcd = 'LYMPHOCC'; tables paramcd*avalc /list missing; run;
+
+%revsupp(libin=TRANS, libout=WORK, ds=FAAE, supp=SUPPfaae);
+
+%revsupp(libin=TRANS, libout=WORK, ds=VS, supp=SUPPvs);
+
+proc sort data=adb.adsl out=adsl; by studyid usubjid; run;
+
+data ar1;
+	length ATPTREF $50;
+	merge ADSL (in=ina) faae (in=inface);
+	by studyid usubjid;	
+	if ina and inface;
+	if faobj in ('Erythema','Swelling') and index(upcase(fatest), 'OCCURRENCE') > 0 then delete;
+	if faobj = 'Receive Medical Attention?' and index(upcase(fatest), 'OCCURRENCE') > 0 then delete;
+	if index(upcase(fatptref),'DOSE 1') > 0 then ATPTREF = 'Vaccination 1';
+	else if index(upcase(fatptref),'DOSE 2') > 0 then ATPTREF = 'Vaccination 2';
+	if facat = 'REACTOGENICITY';
+	
+	
+	/*for AVAL derivation only, will not be kept in final dataset*/	
+	if index(upcase(FASTRESC),"GRADE 0") > 0 then ATOXGR = 'Grade 0';
+	if index(upcase(FASTRESC),"GRADE 1") > 0 then ATOXGR = 'Grade 1';
+	if index(upcase(FASTRESC),"GRADE 2") > 0 then ATOXGR = 'Grade 2'; 
+	if index(upcase(FASTRESC),"GRADE 3") > 0 then ATOXGR = 'Grade 3';
+	if index(upcase(FASTRESC),"GRADE 4") > 0 then ATOXGR = 'Grade 4';
+run;
+
+/*
+proc freq data=ar1; tables faobj*fatest*faorres /list missing; run;
+
+proc freq data=ar1; tables faobj*fatest*faorres /list missing; where faobj in ('Erythema','Swelling'); run;*/
+
+data ar2;
+	merge adsl (in=ina) vs (in=invs drop=subjid);
+	by studyid usubjid;
+	if ina and invs;
+	if vscat = 'REACTOGENICITY' and  vstptnum > 7;
+	length ATPTREF $50;
+	if index(upcase(vstptref),'DOSE 1') > 0 then ATPTREF = 'Vaccination 1';
+	else if index(upcase(vstptref),'DOSE 2') > 0 then ATPTREF = 'Vaccination 2';
+run;
+
+/*proc freq data=ar2; tables vscat*vstestcd*vsstresu /list missing; run;*/
+
+%macro create_paramcd1(paramcd=, param=, subset=, subcond=);
+data adar_&paramcd;
+	set adar;
+	where paramcd = "&subset." &subcond.;
+run;
+proc sort nodupkey; by usubjid atptref atpt  ; run;
+
+proc sql noprint; 
+	create table _&paramcd. as select distinct studyid, usubjid, atptref,
+		"&paramcd." as paramcd, "&param." as param, count (*) as aval
+		from adar_&paramcd  
+		group by usubjid, atptref;
+quit;
+
+%mend create_paramcd1;
+
+%create_paramcd1(paramcd=HPRASDUR,  param=%str(Number of Days for Rash by Health Provider), subset = RASH, subcond=%str(and atoxgrn>0));
+%create_paramcd1(paramcd=HPLYMDUR,  param=%str(Number of Days for Lymphadenopathy by Health Provider), subset = LYMPHOCC, subcond=%str(and avalc='Y'));
+
+%macro create_paramcd2(paramcd=, param=, subset=, subcond=%str(and atoxgrn>0), aedata=ar1, varlist1=faobj fatest fastresc fastresn, varlist2=fatpt, aecond=);
+proc sort data=adar out=adar_&paramcd;
+	by usubjid atptref atptgr1 atoxgrn atptn;
+	where paramcd = "&subset." &subcond.; 
+run;
+
+data adar_&paramcd.;
+	set adar_&paramcd.;
+	by usubjid atptref atptgr1 atoxgrn atptn ;
+	if last.atptgr1;
+run;
+
+proc sql noprint; 
+	create table adar_&paramcd._cnt as select distinct studyid, usubjid, atptref, count (*) as totcnt
+		from adar_&paramcd. 
+		where paramcd = "&subset." &subcond.
+		group by usubjid, atptref;
+quit;
+
+Proc sort data=&aedata. out=&aedata._&paramcd. (keep=Studyid usubjid atptref &varlist1. &varlist2.) nodupkey;
+	by studyid usubjid atptref &varlist2.;
+	where &aecond.;
+run;
+
+proc sql noprint; 
+	create table &aedata._&paramcd._cnt as select distinct studyid, usubjid, atptref, count (*) as totcnt2
+		from &aedata._&paramcd. 
+		group by usubjid, atptref;
+quit;
+
+data adar_&paramcd._cnt_&aedata.;
+	merge adar_&paramcd._cnt (in=a) &aedata._&paramcd._cnt (in=b);
+	by Studyid usubjid atptref;
+	if a or b;
+
+        if totcnt ne . and totcnt2 ne . then aval = sum(totcnt, totcnt2);
+	else if totcnt ne . and totcnt2 eq . then aval = totcnt;
+	else if totcnt eq . and totcnt2 ne . then do;
+		%if &aedata.= ar1 %then %do;
+			put 'ALERT_C: subject there is duration in FAAE but not in ADAR ' USUBJID  ' ' ATPTREF;
+			%end;
+		%else %if &aedata= ar2 %then %do;
+			put 'ALERT_C: subject there is duration in VS but not in ADAR ' USUBJID  ' ' ATPTREF;
+			%end;
+		aval = totcnt2;
+	     end;
+run;
+
+proc sql noprint; 
+	create table _&paramcd. as select distinct studyid, usubjid, atptref,
+		"&paramcd." as paramcd, "&param." as param, aval
+		from adar_&paramcd._cnt_&aedata. 
+		order by usubjid, atptref;
+quit;
+
+%mend create_paramcd2;
+
+%create_paramcd2(paramcd=RASHDUR,  param=%str(Number of Days for Rash), subset = RASHOCC, subcond=%str(and avalc = 'Y'), AECOND = %str(faobj='Rash' and fastresc not in ('', 'N')));
+%create_paramcd2(paramcd=LYMPHDUR, param=%str(Number of Days for Underarm Gland Swelling or Tenderness), subset = LYMPH,AECOND = %str(faobj='Underarm Gland Swelling or Tenderness' and fastresc not in ('', 'NONE')));
+%create_paramcd2(paramcd=PAINDUR,  param=%str(Number of Days for Pain), subset = PAIN, AECOND = %str(faobj='Pain' and fastresc not in ('', 'NONE')));
+%create_paramcd2(paramcd=ERYTHDUR, param=%str(Number of Days for Erythema), subset = ERYTHDIA, AECOND = %str((faobj='Erythema' and FATEST = 'Longest Diameter' and fastresn >= 25) or (faobj='Erythema' and index(upcase(fatest), 'INTENSITY' ) > 0 and ATOXGR in ('Grade 1' 'Grade 2'  'Grade 3'  ))));
+%create_paramcd2(paramcd=SWELLDUR, param=%str(Number of Days for Swelling), subset = SWELLDIA, AECOND = %str((faobj='Swelling' and FATEST = 'Longest Diameter' and fastresn >= 25) or (faobj='Swelling' and index(upcase(fatest), 'INTENSITY' ) > 0 and ATOXGR in ('Grade 1' 'Grade 2'  'Grade 3'  ))));
+%create_paramcd2(paramcd=HEADADUR, param=%str(Number of Days for Headache), subset = HEADACHE, AECOND = %str(faobj='Headache' and fastresc not in ('', 'NONE')));
+%create_paramcd2(paramcd=FATIGDUR, param=%str(Number of Days for Fatigue), subset = FATIGUE, AECOND = %str(faobj='Fatigue' and fastresc not in ('', 'NONE')));
+%create_paramcd2(paramcd=MYALGDUR, param=%str(Number of Days for Myalgia), subset = MYALGIA, AECOND = %str(faobj='Myalgia' and fastresc not in ('', 'NONE')));
+%create_paramcd2(paramcd=ARTHRDUR, param=%str(Number of Days for Arthralgia), subset = ARTHRALG, AECOND = %str(faobj='Arthralgia' and fastresc not in ('', 'NONE')));
+%create_paramcd2(paramcd=NAUSEDUR, param=%str(Number of Days for Nausea), subset = NAUSEA, AECOND = %str(faobj='Nausea/Vomiting' and fastresc not in ('', 'NONE')));
+%create_paramcd2(paramcd=CHILLDUR, param=%str(Number of Days for Chills), subset = CHILLS, AECOND = %str(faobj='Chills' and fastresc not in ('', 'NONE')));
+%create_paramcd2(paramcd=FEVERDUR, param=%str(Number of Days for Fever), subset = FEVER, aedata=ar2, varlist1=vstestcd vsstresn, varlist2=vstpt, AECOND = %str(vstestcd='TEMP' and vsstresn >=38));
+
+
+%macro create_paramcd3(paramcd=, param=, subcond1=, subcond2=, aecond1=, aecond2=);
+proc sort data=adar out=adar_&paramcd;
+	by usubjid atptref atptgr1 atoxgrn atptn;
+	where &subcond1. &subcond2.;
+run;
+
+data adar_&paramcd.;
+	set adar_&paramcd.;
+	by usubjid atptref atptgr1 atoxgrn atptn ;
+	if last.atptgr1;
+run;
+ 
+proc sql noprint; 
+	create table adar_&paramcd._cnt as select distinct studyid, usubjid, atptref, count (*) as totcnt
+		from adar_&paramcd. 
+		where &subcond1. &subcond2.
+		group by usubjid, atptref;
+quit;
+
+Proc sort data=ar1 out=ar1_&paramcd. (keep=Studyid usubjid atptref faobj fatest fastresc fastresn fatpt fascat) nodupkey;
+	by studyid usubjid atptref fatpt;
+	where &aecond1.;
+run;
+ 
+proc sql noprint; 
+	create table ar1_&paramcd._cnt as select distinct studyid, usubjid, atptref, count (*) as totcnt2
+		from ar1_&paramcd. 
+		group by usubjid, atptref;
+quit;
+
+Proc sort data=ar2 out=ar2_&paramcd. (keep=Studyid usubjid atptref vstestcd vsstresn vstpt) nodupkey;
+	by studyid usubjid atptref vstpt;
+	where &aecond2.;
+run;
+ 
+
+proc sql noprint; 
+	create table ar2_&paramcd._cnt as select distinct studyid, usubjid, atptref, count (*) as totcnt3
+		from ar2_&paramcd. 
+		group by usubjid, atptref;
+quit;
+
+data adar_&paramcd._cnt_ar;
+	merge adar_&paramcd._cnt (in=a) ar1_&paramcd._cnt (in=b) ar2_&paramcd._cnt (in=c);
+	by Studyid usubjid atptref;
+	if a or b or c;
+        if totcnt ne . or totcnt2 ne . or totcnt3 ne . then aval = sum(totcnt, totcnt2, totcnt3);
+run;
+
+proc sql noprint; 
+	create table _&paramcd. as select distinct studyid, usubjid, atptref,
+		"&paramcd." as paramcd, "&param." as param, aval
+		from adar_&paramcd._cnt_ar 
+		order by usubjid, atptref;
+quit;
+
+%mend create_paramcd3;
+
+*ANYDUR;
+%create_paramcd3(paramcd=ANYDUR, param=%str(Number of Days for Any Solicited AR), subcond1 = %str(paramcd not in ('LYMPHOCC','RASHOCC','RASH') and atoxgrn>0), subcond2 = %str( or (paramcd = 'RASHOCC' and avalc = 'Y')), 
+AECOND1 = 
+%str((faobj in ('Erythema','Swelling') and fatest = 'Longest Diameter' and Fastresn > 25) or 
+(faobj not in ('Erythema','Swelling','') and fastresc not in ('','NONE','N')) or
+(faobj in ('Erythema','Swelling') and  index(upcase(fatest), 'INTENSITY' ) > 0 and ATOXGR in ('Grade 1' 'Grade 2' 'Grade 3')) or 
+(faobj in ('Fever') and  ATOXGR in ('Grade 1' 'Grade 2' 'Grade 3' 'Grade 4') )), 
+AECOND2 = %str(vstestcd ='TEMP' and vsstresn >=38));
+
+*LOCDUR;
+%create_paramcd3(paramcd=LOCDUR, param=%str(Number of Days for Local Solicited AR), subcond1 = %str(parcat1 = 'LOCAL'), subcond2 = %str(and atoxgrn>0), 
+AECOND1 = %str((faobj in ('Erythema','Swelling') and fatest = 'Longest Diameter' and Fastresn > 25) or 
+(faobj in ('Pain','Underarm Gland Swelling or Tenderness') and fastresc not in ('','NONE')) or
+(faobj in ('Erythema','Swelling') and  index(upcase(fatest), 'INTENSITY' ) > 0  and ATOXGR in ('Grade 1' 'Grade 2' 'Grade 3')   )),
+AECOND2 = %str(vstestcd ='TEMP' and .< vsstresn < 0));
+
+*SYSDUR;
+%create_paramcd3(paramcd=SYSDUR, param=%str(Number of Days for Systemic Solicited AR), subcond1 = %str(parcat1 = 'SYSTEMIC' and paramcd not in ('LYMPHOCC','RASHOCC','RASH') and atoxgrn>0), subcond2 = %str(or (paramcd = 'RASHOCC' and avalc = 'Y')),
+AECOND1 = %str(fascat = 'SYSTEMIC' and fastresc not in ('','NONE','N')), AECOND2 = %str(vstestcd ='TEMP' and vsstresn >=38));
+
+************ ATOXGR, and AVALC **************;
+
+%macro create_paramcd4(paramcd=, param=, subset=, subcond=%str(and not missing(avalc)));
+data _&paramcd.;	
+	set adar;
+	where paramcd = "&subset."  &subcond.;
+run;
+
+proc sort data=_&paramcd.; by usubjid atptref avalc descending aseq; run;
+
+data _&paramcd.;
+	set _&paramcd.;
+	by usubjid atptref avalc descending aseq;
+	if last.atptref;
+	keep studyid usubjid atptref avalc aseq;
+run;
+
+data _&paramcd.;
+	set _&paramcd.;
+	paramcd = "&paramcd.";
+	param = "&param.";
+run;
+	
+%mend create_paramcd4;
+
+%create_paramcd4(paramcd=RASHOCYN,  param=%str(Rash Occurence between Day 1 and Day 7), subset = RASHOCC);
+%create_paramcd4(paramcd=LYMOCCYN,  param=%str(Lymphadenopathy Occurence between Day 1 and Day 7), subset = LYMPHOCC);
+
+%macro create_paramcd5(paramcd=, param=, subset=, subcond=%str(and not missing(atoxgr)));
+data _&paramcd.;	
+	set adar;
+	where paramcd = "&subset."  &subcond.;
+run;
+
+proc sort data=_&paramcd.; by usubjid atptref atoxgr avalc descending aseq; run;
+
+data _&paramcd.;
+	set _&paramcd.;
+	by usubjid atptref atoxgr avalc descending aseq;
+	if last.atptref;
+	keep studyid usubjid atptref atoxgr avalc aseq;
+run;
+
+data _&paramcd.;
+	set _&paramcd.;
+	paramcd = "&paramcd.";
+	param = "&param.";
+run;
+	
+%mend create_paramcd5;
+
+%create_paramcd5(paramcd=WRASH,  param=%str(Worst Analysis Toxicity Grade for Rash between Day 1 and Day 7), subset = RASH);
+%create_paramcd5(paramcd=WLYMPH,  param=%str(Worst Analysis Toxicity Grade for Underarm Gland Swelling or Tenderness between Day 1 and Day 7), subset = LYMPH);
+%create_paramcd5(paramcd=WPAIN,  param=%str(Worst Analysis Toxicity Grade for Pain between Day 1 and Day 7), subset = PAIN);
+%create_paramcd5(paramcd=WERYTH,  param=%str(Worst Analysis Toxicity Grade for Erythema between Day 1 and Day 7), subset = ERYTHDIA);
+%create_paramcd5(paramcd=WSWELL,  param=%str(Worst Analysis Toxicity Grade for Swelling between Day 1 and Day 7), subset = SWELLDIA);
+%create_paramcd5(paramcd=WHEAD,  param=%str(Worst Analysis Toxicity Grade for Headache between Day 1 and Day 7), subset = HEADACHE);
+%create_paramcd5(paramcd=WFATIGUE,  param=%str(Worst Analysis Toxicity Grade for Fatigue between Day 1 and Day 7), subset = FATIGUE);
+%create_paramcd5(paramcd=WMYALGIA,  param=%str(Worst Analysis Toxicity Grade for Myalgia between Day 1 and Day 7), subset = MYALGIA);
+%create_paramcd5(paramcd=WARTHR,  param=%str(Worst Analysis Toxicity Grade for Arthralgia between Day 1 and Day 7), subset = ARTHRALG);
+%create_paramcd5(paramcd=WNAUSEA,  param=%str(Worst Analysis Toxicity Grade for Nausea between Day 1 and Day 7), subset = NAUSEA);
+%create_paramcd5(paramcd=WCHILLS,  param=%str(Worst Analysis Toxicity Grade for Chills between Day 1 and Day 7), subset = CHILLS);
+%create_paramcd5(paramcd=WFEVER,  param=%str(Worst Analysis Toxicity Grade for Fever between Day 1 and Day 7), subset = FEVER);
+
+%macro create_paramcd6(paramcd=, param=, subcond1=, subcond2=%str(and not missing(atoxgr)));
+data _&paramcd.;	
+	set adar;
+	where &subcond1.  &subcond2.;
+run;
+
+proc sort data=_&paramcd.; by usubjid atptref atoxgr descending aseq; run;
+
+data _&paramcd.;
+	set _&paramcd.;
+	by usubjid atptref atoxgr descending aseq;
+	if last.atptref;
+	keep studyid usubjid atptref atoxgr aseq;
+run;
+
+data _&paramcd.;
+	set _&paramcd.;
+	paramcd = "&paramcd.";
+	param = "&param.";
+run;
+	
+%mend create_paramcd6;
+
+%create_paramcd6(paramcd=WSAR,  param=%str(Worst Analysis Toxicity Grade for Any Solicited AR between Day 1 and Day 7), subcond1=%str(paramcd not in ('RASH','LYMPHOCC','RASHOCC')));
+%create_paramcd6(paramcd=WSLAR,  param=%str(Worst Analysis Toxicity Grade for Any Solicited Local AR between Day 1 and Day 7), subcond1=%str(parcat1 = 'LOCAL'));
+%create_paramcd6(paramcd=WSSAR,  param=%str(Worst Analysis Toxicity Grade for Any Solicited Systemic AR between Day 1 and Day 7), subcond1=%str(parcat1 = 'SYSTEMIC' and paramcd not in ('RASH','LYMPHOCC','RASHOCC')));
+
+data adarsum; 
+length param $200 parcat1 $50 paramcd $8;
+	set _:;
+	if paramcd in ('LYMPHDUR','PAINDUR','ERYTHDUR','SWELLDUR','WLYMPH','WPAIN','WERYTH','WSWELL','WSLAR') then do; 
+	  PARCAT1 = 'LOCAL'; 
+	  PARCAT1N = 1; 
+	end;
+	if paramcd in ('HEADADUR','FATIGDUR','MYALGDUR','ARTHRDUR','NAUSEDUR','CHILLDUR','FEVERDUR','RASHDUR','WHEAD','WFATIGUE','WMYALGIA','WARTHR','WNAUSEA','WCHILLS','WFEVER','WSSAR') then do; 
+	  PARCAT1 = 'SYSTEMIC'; 
+	  PARCAT1N = 2; 
+	end;
+
+	************ ATOXGRN **************;
+	if index(ATOXGR, 'Grade')> 0 then atoxgrn = input(substr(atoxgr,7),best.);
+run;
+
+proc freq data=adarsum; tables parcat1*paramcd*param /list missing; run;
+
+proc sort data=adarsum;
+	by usubjid;
+run;
+
+data adarsum; 
+	merge adarsum(in=a) adb.adsl(in=b keep=usubjid); 
+	by usubjid;
+	if a and b;
+run;
+
+proc freq data=adarsum; tables paramcd*param /list missing; run;
+ 
+proc sort data=adarsum; by usubjid atptref; run;
+
+%trta(dsname=adarsum);
+
+data adarsum;
+	set adarsum; 
+
+	length SRCDOM $20 SRCVAR $50;
+	if index(PARAMCD,'DUR') = 0 then SRCDOM = 'ADAR';
+	
+	if PARAMCD in ('RASHOCYN','LYMOCCYN') then SRCVAR = 'AVALC';
+	else if index(PARAM,'Worst') > 0 then SRCVAR = 'ATOXGR';	
+run;
+
+proc freq data=adarsum; tables atptref*trta*trtan /list missing; run;
+
+data adarsum1 adarsum2;
+	set adarsum;
+	if index(PARAMCD,'DUR') = 0 then output adarsum1;
+	else output adarsum2;
+run;
+
+proc sort data=adarsum1; by usubjid atptref paramcd aseq; run;
+
+data adarsum0;
+	set adarsum1;
+	by usubjid atptref paramcd aseq;
+	if first.paramcd;
+	srcseq = aseq;
+	keep usubjid atptref paramcd srcseq;
+run;
+
+data adarsum3;
+	merge adarsum1 adarsum0;
+	by usubjid atptref paramcd;
+run;
+
+data adarsum;
+	set adarsum2 adarsum3;
+run;
+
+**Generate final dataset by updating certain attributes. Optionally merge common variables & create sequence variable as needed**;
+%adam_dataset_update(
+	ds=ADARSUM,
+	libin=work,
+	libout=output,
+	adsllib=adb,
+	addcomvar=Y,
+	addseq=N,
+	dropinfmt=Y,
+	mapspecfile=&ADAM_SPEC,
+	maploc=&ADAM_SPEC_LOC,
+	debug=N
+	);
+
+proc contents data=output.ADARSUM; run;
+
+ 

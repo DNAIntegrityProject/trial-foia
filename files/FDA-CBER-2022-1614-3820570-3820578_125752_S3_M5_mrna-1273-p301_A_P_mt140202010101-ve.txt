@@ -1,0 +1,422 @@
+*************************************************************************************************;
+*           CLIENT: ModernaTX, Inc.
+*         PROTOCOL: mRNA-1273-P301
+*          PURPOSE: Create common code - Subgroup Analysis of Vaccine Efficacy      
+*      INPUT FILES: ADaM datasets
+*     OUTPUT FILES: FINAL.sas7bdat
+*      USAGE NOTES: 
+*************************************************************************************************;
+*  Copyright 2020 Pharmaceutical Product Development, Inc.
+*  All Rights Reserved.
+*************************************************************************************************;
+
+
+%macro update_bign;
+
+%global total_col_display _default_col1_width_pcnt;
+%let _default_col1_width_pcnt=50;
+%let total_col_display = NONE;
+
+%if %symexist(in_lib) ne 0 %then %do;
+%ma_bign
+	( in_data = bign_b
+	, in_where = &popfl.='Y' and covbln^=9 &bign_whr.
+	, subgroup = &cohortn.
+	, subgroup_preloadfmt = &subgroup_fmt.
+	);
+%end;
+%else %if %symexist(in_lib)=0 %then %do; 
+	%colheader_type(total_display=none);
+	%let _default_col1_width_pcnt=50;
+
+	%global in_lib; 
+	%let in_lib=adb; 
+	%put "Alert_C: library in_lib=&in_lib.";
+
+	%if %symexist(bign_whr) ne 0 %then %do;
+	%ma_bign
+		( in_data = adsl_b
+		, in_where = &popfl.='Y' and covbln^=9 &bign_whr.
+		, subgroup = &cohortn.
+		, subgroup_preloadfmt = &subgroup_fmt.
+		);
+	%end;
+%end;
+%mend update_bign;
+%update_bign;
+
+**In_dataset;
+proc sql;
+	create table indata as 
+	select a.*,b.BMIBL
+	from &in_lib..&indata. a left join adb.adsl b 
+	on a.usubjid=b.usubjid and a.subjid=b.subjid;
+quit;
+
+data subset;
+	set indata;
+	where &subwhere.;
+	%process_covbln(spanYN=,spaner=&subgroup.);
+run;
+
+proc sort data=subset; by &cohortn. usubjid subjid paramcd aval; run;
+
+data subset;
+	set subset;
+	by &cohortn. usubjid subjid paramcd aval;
+	if last.paramcd then output;
+run;
+
+%macro update_count_one_row;
+ %ma_count_one_row
+ (  in_data             = subset
+  , in_where            = CNSR=0 
+  , subgroup			= &cohortn.
+ %if %symexist(row1text)=0 %then %do; 
+  %if %substr(&paramcd.,1,%eval(%length(&paramcd.)-1)) eq TTCVD or &paramcd eq TTCVD1B %then %do;
+  , text_for_column1    = %str(Number of Subjects with COVID-19, n (%%))
+  %end;
+  %if %substr(&paramcd.,1,%eval(%length(&paramcd.)-1)) eq TTCVDSE %then %do;
+  , text_for_column1    = %str(Number of Subjects with Severe COVID-19, n (%%))
+  %end;
+  %if %substr(&paramcd.,1,%eval(%length(&paramcd.)-1)) eq TTINF %then %do;
+  , text_for_column1    = %str(Number of Subjects with SARS-CoV-2 Infection Regardless of Symptomatology and Severity, n (%%))
+  %end;
+  %if %substr(&paramcd.,1,%eval(%length(&paramcd.)-1)) eq TTCVDSD %then %do;
+  , text_for_column1    = %str(Number of Subjects with Secondary Definition of COVID-19, n (%%))
+  %end;
+  %if %substr(&paramcd.,1,%eval(%length(&paramcd.)-1)) eq TTDTHCV %then %do;
+  , text_for_column1    = %str(Number of Subjects with Death Caused by COVID-19, n (%%))
+  %end;
+  %if %substr(&paramcd.,1,%eval(%length(&paramcd.)-1)) eq TTASYMP or 
+		%substr(&paramcd.,1,%eval(%length(&paramcd.)-1)) eq TTASYCR %then %do;
+  , text_for_column1    = %str(Number of Subjects with Asymptomatic SARS-CoV-2 Infection, n (%%))
+  %end;
+  %if &paramcd. eq TTDEATH %then %do;
+  , text_for_column1    = %str(Number of Subjects with All-Cause Mortality, n (%%))
+  %end;
+%end; %else %do;
+  , text_for_column1    = %bquote(&row1text.)
+%end;
+  , indent_column1      = 0
+  , _section_           = 1 
+  , _order1_            = 10
+  , get_subj_count      = Yes
+  , count_subj_var      = N
+  , out_data            = event_cnt 
+ );
+%mend update_count_one_row;
+%update_count_one_row;
+
+ %ma_count_one_row
+ (  in_data             = subset
+  , in_where            = CNSR=1 
+  , subgroup			= &cohortn.
+  , text_for_column1    = %str(Number of Subjects Censored, n (%%))
+  , indent_column1      = 0
+  , _section_           = 1 
+  , _order1_            = 20
+  , get_subj_count      = Yes
+  , count_subj_var      = N
+  , out_data            = cnsr_cnt 
+ );
+
+ %if %symexist(cnsr2) ne 0 %then %do; 
+ %ma_count_one_row
+ (  in_data             = subset
+  , in_where            = CNSR=2
+  , subgroup			= &cohortn.
+  , text_for_column1    = %str(Number of Subjects with Competing Event, n (%%))
+  , indent_column1      = 0
+  , _section_           = 1 
+  , _order1_            = 15
+  , get_subj_count      = Yes
+  , count_subj_var      = N
+  , out_data            = cnsr_cnt2 
+ );
+ %end;
+
+data all_cnt;
+ 	 length col1 $200;
+     set event_cnt cnsr_cnt %if %symexist(cnsr2) ne 0 %then %do; cnsr_cnt2 %end;;
+run;
+
+%ma_n_pcnt
+ (  in_data = all_cnt
+  , subgroup = &cohortn.
+  , in_numerator = n
+  , in_denom_var = denom
+  , no_pcnt_if =      
+  , trigger_pcnt_sign = &_default_trigger_pcnt_sign.
+  , trigger_tight_paren = &_default_trigger_tight_paren.
+  , trigger_n_space_pcnt = yes
+  , blank_for_zero_denom = &_default_blank_for_zero_denom. 
+  , out_data = all_N_PCNT
+  , out_pcnt = pcnt
+  , out_display_var = n_pcnt
+ );
+
+%ma_summ_stats
+ (  in_data   = subset
+  , vars      = aval
+  , subgroup  = &cohortn.
+  , summ_stats_additional = SUM  
+  , out_data  = SUMM_STATS
+  );
+
+%blankprogram;
+
+data section2;
+    length &_default_trtvar. $2;
+    length col1 $200;
+    set VEHR_outdst;
+    &_default_trtvar.='2';
+    _section_=2;
+    _skipvar_=2;
+	if ^missing(VE) then _hr=strip(put(round(VE,0.001),15.3));
+	else _hr='NE';
+	if ^missing(VELOW) then _lcl=strip(put(round(VELOW,0.001),15.3));
+	else _lcl='NE';
+	if ^missing(VEUPP) then _ucl=strip(put(round(VEUPP,0.001),15.3));
+	else _ucl='NE';
+	if ^missing(VEPVAL) and vepval<0.0001 then _pval='<.0001';
+	else if ^missing(VEPVAL) then _pval=strip(put(round(VEPVAL,0.0001),PVALUE6.4));
+	else _pval='NE';
+
+    _order1_=10;
+    col1="Vaccine Efficacy Based on Hazard Ratio (&cipen.% CI) [1]";
+    _indent_=0;
+    if ^missing(_hr) then n_pcnt=strip(_hr)||' ('||strip(_lcl)||', '||strip(_ucl)||')';
+    output;
+
+	%if %symexist(dispvalue) ne 0 %then %do;
+    _order1_=20;
+    col1='p-value [2]';
+    _indent_=2;
+    n_pcnt=_pval;
+    output;
+	%end;
+run;
+
+data pw;
+    length col1 $200;
+    set SUMM_STATS;
+    _section_=3;
+    _skipvar_=3;
+	_order1_=10;
+
+	%if %symexist(dispvalue) ne 0 %then %do;
+	col1='Person-Years [3]';
+	%end;
+	%else %do;
+	col1='Person-Years [2]';
+	%end;
+	_indent_=0;
+	if ^missing(var1_SUM) then do;
+	    _pw=var1_SUM/365.25;
+        n_pcnt=strip(put(_pw,15.1));
+	end;
+	else n_pcnt='NE';
+run;
+
+data _section3;
+    length col1 $200;
+    set VEIR_outdst;
+    _section_=3;
+    _skipvar_=3;
+	if ^missing(IR) then _ir=strip(put(IR,15.3));
+	else _ir='NE';
+	if ^missing(IRLOW) then _irlow=strip(put(IRLOW,15.3));
+	else _irlow='NE';
+	if ^missing(IRUPP) then _irupp=strip(put(IRUPP,15.3));
+	else _irupp='NE';
+	if ^missing(VEIR) then _veir=strip(put(VEIR,15.3));
+	else _veir='NE';
+	if ^missing(VEIRLOW) then _veirlow=strip(put(VEIRLOW,15.3));
+	else _veirlow='NE';
+	if ^missing(VEIRUPP) then _veirupp=strip(put(VEIRUPP,15.3));
+	else _veirupp='NE';
+	    _order1_=20;
+
+		%if %symexist(dispvalue) ne 0 %then %do;
+	    col1="Incidence Rate per 1,000 Person-Years (&cipen.% CI) [4]";
+		%end;
+		%else %do;
+	    col1="Incidence Rate per 1,000 Person-Years (&cipen.% CI) [3]";
+		%end;
+	    _indent_=0;
+		n_pcnt=strip(_ir)||' ('||strip(_irlow)||', '||strip(_irupp)||')';
+	    output;
+		if trt01p^='Placebo' then do;
+	    _order1_=30;
+
+		%if %symexist(dispvalue) ne 0 %then %do;
+	    col1="Vaccine Efficacy Based on Incidence Rate (&cipen.% CI) [5]";
+		%end;
+		%else %do;
+	    col1="Vaccine Efficacy Based on Incidence Rate (&cipen.% CI) [4]";
+		%end;
+	    _indent_=0;
+		n_pcnt=strip(_veir)||' ('||strip(_veirlow)||', '||strip(_veirupp)||')';
+	    output;
+		end;
+run;
+
+proc sql noprint;
+    create table section3 as
+	select a.*, strip(put(b.&_default_trtvar.,best.)) as &_default_trtvar. length=2
+	from _section3 as a left join (select distinct &_default_trtvar., trt01p from adb.adsl) as b
+	on a.trt01p=b.trt01p
+	;
+quit;
+
+
+data setall;
+    set all_N_PCNT section2 pw section3;
+run;
+proc sort data=setall nodupkey; by _all_; where ^missing(&_default_trtvar.); run;
+
+
+%mu_transpose
+ (  in_data = setall
+  , transpose_by = _section_ _skipvar_ _order1_ _indent_ col1 &cohortn. 
+  , transpose_vars = n_pcnt
+  , transpose_id = &_default_trtvar.
+  , out_data = all_TRANSP_PCNT
+ );
+
+
+data allparts;
+	set all_TRANSP_PCNT:;
+	if _section_=. then delete;
+	%if &paramcd. eq TTDEATH %then %do;
+	if _section_=1 or index(col1,'Hazard Ratio');
+	%end;
+run;
+
+proc sort data=allparts;
+	by &cohortn. _section_ _skipvar_ _order1_ _indent_;
+run;
+
+%macro crete_rtf; 
+
+%mr_pack
+  (  in_data=allparts
+   , out_data=MR_PACK
+   , var=col1
+   , packvar_label =
+   , page_width_chars = &_default_page_width_chars.
+   , col1_width_pcnt = &_default_col1_width_pcnt.
+   , indent=_indent_
+  );
+
+ *** Get title & footnote;
+%get_tf
+ (  tlf_progname = &get_tf_id. 
+  , escapechar = &_default_escapechar.
+ );
+
+ data _null_;
+     set &g_deliverableid._tf;
+	 if index(upcase(tf_text),'VE IS DEFINED AS') then call symput('displayve','Y');
+run;
+
+data MR_PACK;
+    set MR_PACK;
+	%if %symexist(displayve) eq 0 %then %do;
+	    if index(col1,'Vaccine Efficacy Based on Incidence Rate') then delete;
+	%end;
+run;
+
+%subtitle(subt=&subtitfl.,use_parse_char=Y);
+		
+%mu_lines_per_page 
+ (  in_data = MR_PACK
+  , metadata_filepath = &g_deliverableid._tf
+  , tlf_progname = &g_deliverableid.
+  , globaltfs = 3
+  , headerLines = 4
+  , nested_headerLines =   
+  , spanner_lines  = 
+  , linesPerPage = &_default_page_length_lines.
+  , escapechar =  &_default_escapechar.
+  , prcode_split  =  &_default_prcode_split.
+  , rtfwidth = &_default_page_width_chars.
+  , subgroup_var = &cohortn.
+ );
+
+%macro update_pagebreak;
+%if &cohortn.^= %then %do;
+%mu_wordscan(string=&cohortn. _skipvar_, root=bv, numw=numbv, delim=%str());
+%mr_pagebreak_table
+ (  vartx               = pack_col1 
+  , lines_left_on_page  = &g_linesleft. 
+  , in_data             = MR_PACK
+  , out_data            = pagebreak
+  , section_protection  = y
+  , lineskip            = 1 
+  , orderby             = &sort_order.
+  , subgrp				= &cohortn.
+  , section             = &&bv&numbv
+ );
+%end;
+%else %do;
+%mr_pagebreak_table
+ (  vartx               = pack_col1 
+  , lines_left_on_page  = &g_linesleft. 
+  , in_data             = MR_PACK
+  , out_data            = pagebreak
+  , section_protection  = y
+  , lineskip            = 1 
+  , orderby             = &sort_order.
+  , section             = _section_
+ );
+%end;
+%mend update_pagebreak;
+%update_pagebreak;
+
+proc sort data=pagebreak nodupkey; by &sort_order.; run;
+
+** align the columns;
+* deciaml align the categorical results ;
+%mu_align
+  ( in_data      = pagebreak
+  , out_data     = __FINAL
+  , colprefix    = n_pcnt_
+  , align        = D
+  ,left_spacing  = 1500
+  , process_if   = index(COL1,'n (%)')^=0
+  );
+%mu_align
+  ( in_data      = __FINAL
+  , out_data     = FINAL
+  , colprefix    = n_pcnt_
+  , align        = C
+  , process_if   = index(COL1,'n (%)')=0
+  );
+
+data final;
+    set final;
+	array _pgn(2) page pagenum;
+	%if &cohortn. ne %then %do;
+	if &cohortn. in (9) then delete;
+	%end;
+
+	%if &cohortn.^= %then %do;
+	format &cohortn. &subtit_fmt.;
+	%end;
+run;
+
+data here.&G_DELIVERABLEID.;
+    set allparts;
+	keep &cohortn. col1 n_pcnt_1 n_pcnt_2;
+
+	%if &cohortn.^= %then %do;
+	format &cohortn. &subtit_fmt.;
+	%end;
+run;
+%mend crete_rtf;
+
+%if %symexist(g_outtype)=0 %then %do;
+%crete_rtf;
+%end;

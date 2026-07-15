@@ -1,0 +1,93 @@
+***************************************************************************************************
+*   CLIENT NAME:  ModernaTX, Inc.
+*   PROTOCOL:  mRNA-1273-P201
+*   PURPOSE:  Create Inferential Statistical Analysis Macro
+*
+*   INPUT FILES:  ADB.*
+*   OUTPUT FILES:  
+*   USAGE NOTES:  
+************************************************************************* 
+*  Copyright 2020 PPD
+*  All Rights Reserved. 
+*************************************************************************;
+
+%macro GMT_GMR_CI (datain=, subset=, dataout=);
+
+data is;
+  set adb.&datain.;
+  where &subset.;
+  run;
+
+  
+  data temp;
+  set is;
+  length trt $20;
+  trt=trt01p;
+  output;
+  if index(trt01p, 'mRNA-1273') then trt='mRNA-1273 Total';
+  output;
+  run;
+
+  data temp1;
+  set temp;
+  length cohort $20;
+  cohort=AGEGR1;
+  output;
+  if AGEGR1^='' then cohort='Overall';;
+  output;
+  run;
+
+
+ proc sort data=temp1 out=n1 nodupkey;
+   by subjid trt cohort paramcd avisit;
+   where ;
+ run;
+
+proc means data=n1 n mean lclm uclm alpha=0.05;
+  var AVAL CHG;
+  class trt cohort PARAM PARAMCD AVISIT;
+  ods output summary=summary1;
+run;
+
+
+
+
+data &dataout.1;
+  set summary1;
+  if AVAL_Mean^=.  then GMT=10**AVAL_Mean;
+  if AVAL_LCLM^=.  then LOWERGMT=10**AVAL_LCLM;
+  if AVAL_UCLM^=.  then UPPERGMT=10**AVAL_UCLM;
+  if CHG_MEAN^=.   then GMR=10**CHG_MEAN;
+  if CHG_LCLM^=.   then LOWERGMR=10**CHG_LCLM;
+  if CHG_UCLM^=.   then UPPERGMR=10**CHG_UCLM;
+  paramcd2=paramcd;
+  PARAMCD2=TRANWRD(PARAMCD2, 'LV58IGGS', 'V58IGGES');
+  PARAMCD2=TRANWRD(PARAMCD2, 'LV58IGGN', 'V58IGGEN');
+  PARAMCD2=TRANWRD(PARAMCD2, 'LV58IGMS', 'V58IGMES');
+  PARAMCD2=TRANWRD(PARAMCD2, 'LV58IG1S', 'V58IG1ES');
+  PARAMCD2=TRANWRD(PARAMCD2, 'LV58IG2S', 'V58IG2ES');
+  PARAMCD2=TRANWRD(PARAMCD2, 'LV58IG3S', 'V58IG3ES');
+  PARAMCD2=TRANWRD(PARAMCD2, 'LV58IG4S', 'V58IG4ES');
+  PARAMCD2=TRANWRD(PARAMCD2, 'LV65IGGS', 'V65IGGS');
+  PARAMCD2=TRANWRD(PARAMCD2, 'LV66IGGN', 'V66IGGN');
+  PARAMCD2=TRANWRD(PARAMCD2, 'L10PVN50', 'PSVNT50');
+  PARAMCD2=TRANWRD(PARAMCD2, 'L10MNET', 'MNET');
+  PARAMCD2=TRANWRD(PARAMCD2, 'L10MN50', 'MN50');
+  rename PARAM=LPARAM;
+  rename PARAMCD=LPARAMCD;
+  rename PARAMCD2=PARAMCD;
+
+  keep trt cohort param paramcd paramcd2 avisit gmt LOWERGMT UPPERGMT gmr LOWERGMR UPPERGMR;
+
+run;
+
+proc sort data= &dataout.1; by paramcd; run;
+proc sort data= adb.&datain. out=adiso(keep=paramcd param) nodupkey; by paramcd; run;
+
+Data &dataout.;
+	merge &dataout.1(in=a) adiso;
+	by paramcd;
+	if a;
+Run;
+
+%mend;

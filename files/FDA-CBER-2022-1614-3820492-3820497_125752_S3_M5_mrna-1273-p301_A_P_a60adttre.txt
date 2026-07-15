@@ -1,0 +1,241 @@
+*************************************************************************************************;
+* 
+*           CLIENT:  ModernaTX, Inc.
+*         PROTOCOL:  mRNA-1273-P301
+*
+*          PURPOSE: Create analysis dataset adttre
+*      
+*      INPUT FILES: SDTM domains
+*     OUTPUT FILES: ADTTRE.sas7bdat
+*
+*      USAGE NOTES: 
+*      
+*************************************************************************************************;
+*  Copyright 2020 Pharmaceutical Product Development, Inc.
+*  All Rights Reserved. 
+*************************************************************************************************;
+
+options noquotelenmax;
+%include "madam.sas";
+
+**Assign global macro variable DSETNAME to reflect the name of the final ADaM dataset**;
+%global DSETNAME;
+%let dsetname = ADTTRE;
+%let adslvar= USUBJID SUBJID  DTHDT EOSDT CUTOFFDT;
+
+
+/*proc sort data=adb.adeff2;by usubjid subjid;run;*/
+proc sort data=adb.adsl out=adsl(keep=&adslvar.);by usubjid subjid;run;
+
+data ADDadsl(WHERE=(ANL01FL='Y' and FASFL='Y'));
+	merge adb.adeff2(in=b) adsl(in=a);
+	by usubjid subjid;
+	if b;
+run;
+
+
+data adeff2;
+	set ADDadsl;
+
+	** PARAM AND PARAMCD********;
+	param = tranwrd(param,' in 7 Days','');
+	param = tranwrd(param,' in 28 Days','');
+	if param="Burden of Disease Score" then paramcd="BOD";
+	else if param="Burden of Infection Score" then paramcd="BOI";
+	** EVENTSEQ;
+	IF PARAMCD="BOD" AND (AVAL=0 OR AVAL=1) THEN DO;
+		EVENTSEQ=1;
+		IF AVAL=0 THEN CNSR=1;
+		ELSE CNSR=0;
+		OUTPUT;
+	END;
+	IF PARAMCD="BOD" AND AVAL=2 THEN DO;
+		EVENTSEQ=1;
+		CNSR=0;
+		OUTPUT;
+	END;
+	IF PARAMCD="BOD" AND AVAL=2 THEN DO;
+		EVENTSEQ=2;
+		CNSR=0;
+		OUTPUT;
+	END;
+	IF PARAMCD="BOD" AND AVAL=3 THEN DO;
+		EVENTSEQ=1;
+		CNSR=0;
+		OUTPUT;
+	END;
+	IF PARAMCD="BOD" AND AVAL=3 THEN DO;
+		EVENTSEQ=2;
+		CNSR=0;
+		OUTPUT;
+	END;
+	IF PARAMCD="BOD" AND AVAL=3 THEN DO;
+		EVENTSEQ=3;
+		CNSR=0;
+		OUTPUT;
+	END;
+	IF PARAMCD="BOI" AND (AVAL=0 OR AVAL=0.5) THEN DO;
+		EVENTSEQ=1;
+		IF AVAL=0 THEN CNSR=1;
+		ELSE CNSR=0;
+		OUTPUT;
+	END;
+	
+	IF PARAMCD="BOI" AND AVAL=1 THEN DO;
+		EVENTSEQ=1;
+		CNSR=0;
+		OUTPUT;
+	END;
+	IF PARAMCD="BOI" AND AVAL=1 THEN DO;
+		EVENTSEQ=2;
+		CNSR=0;
+		OUTPUT;
+	END;
+	IF PARAMCD="BOI" AND AVAL=2 THEN DO;
+		EVENTSEQ=1;
+		CNSR=0;
+		OUTPUT;
+	END;
+	IF PARAMCD="BOI" AND AVAL=2 THEN DO;
+		EVENTSEQ=2;
+		CNSR=0;
+		OUTPUT;
+	END;
+	IF PARAMCD="BOI" AND AVAL=2 THEN DO;
+		EVENTSEQ=3;
+		CNSR=0;
+		OUTPUT;
+	END;
+	IF PARAMCD="BOI" AND AVAL=2 THEN DO;
+		EVENTSEQ=4;
+		CNSR=0;
+		OUTPUT;
+	END;
+	IF PARAMCD="BOI" AND AVAL=3 THEN DO;
+		EVENTSEQ=1;
+		CNSR=0;
+		OUTPUT;
+	END;
+	IF PARAMCD="BOI" AND AVAL=3 THEN DO;
+		EVENTSEQ=2;
+		CNSR=0;
+		OUTPUT;
+	END;
+	IF PARAMCD="BOI" AND AVAL=3 THEN DO;
+		EVENTSEQ=3;
+		CNSR=0;
+		OUTPUT;
+	END;
+	IF PARAMCD="BOI" AND AVAL=3 THEN DO;
+		EVENTSEQ=4;
+		CNSR=0;
+		OUTPUT;
+	END;
+	IF PARAMCD="BOI" AND AVAL=3 THEN DO;
+		EVENTSEQ=5;
+		CNSR=0;
+		OUTPUT;
+	END;
+	IF PARAMCD="BOI" AND AVAL=3 THEN DO;
+		EVENTSEQ=6;
+		CNSR=0;
+		OUTPUT;
+	END;
+run;
+/*PROC FREQ DATA=ADEFF2;TABLE PARAMCD*AVAL;RUN;*/
+DATA FINAL;
+	SET ADEFF2;
+	LENGTH EVNTDESC $100 ; 
+	IF PARAMCD = "BOD" THEN DO;
+		IF AVAL=0 THEN EVNTDESC = "Without COVID-19";
+		ELSE IF AVAL=1 THEN EVNTDESC = "COVID-19 without hospitalization";
+		ELSE IF AVAL=2 THEN EVNTDESC = "COVID-19 with hospitalization";
+		ELSE IF AVAL=3 THEN EVNTDESC = "Death";
+		IF EVENTSEQ=1 THEN STARTVAL=0;
+		ELSE IF EVENTSEQ=2 and cmiss(adt,randdt)=0 THEN STARTVAL=(adt-randdt);
+		ELSE IF EVENTSEQ=3 and cmiss(adt,randdt)=0 THEN STARTVAL=(adt-randdt)+1*10**(-10);
+	END;
+	IF PARAMCD = "BOI" THEN DO;
+		IF AVAL=0 THEN EVNTDESC = "No infection";
+		ELSE IF AVAL=0.5 THEN EVNTDESC = "Asymptomatic infection";
+		ELSE IF AVAL=1 THEN EVNTDESC = "COVID-19 without hospitalization";
+		ELSE IF AVAL=2 THEN EVNTDESC = "COVID-19 with hospitalization";
+		ELSE IF AVAL=3 THEN EVNTDESC = "Death";
+		IF EVENTSEQ=1 THEN STARTVAL=0;
+		ELSE IF EVENTSEQ=2 and cmiss(adt,tr01sdt)=0 THEN STARTVAL=(adt-tr01sdt);
+		ELSE IF EVENTSEQ=3 and cmiss(adt,tr01sdt)=0 THEN STARTVAL=(adt-tr01sdt)+1*10**(-10);
+		ELSE IF EVENTSEQ=4 and cmiss(adt,tr01sdt)=0 THEN STARTVAL=(adt-tr01sdt)+2*10**(-10);
+		ELSE IF EVENTSEQ=5 and cmiss(adt,tr01sdt)=0 THEN STARTVAL=(adt-tr01sdt)+3*10**(-10);
+		ELSE IF EVENTSEQ=6 and cmiss(adt,tr01sdt)=0 THEN STARTVAL=(adt-tr01sdt)+4*10**(-10);
+	END;
+	minvalue = min(DTHDT,EOSDT,CUTOFFDT,EFFCODT,AP01EDT);
+	format minvalue date9.;
+RUN;
+data &DSETNAME.;
+	set final(rename=(aval=_aval));
+	if PARAMCD = "BOD" THEN DO;
+		if EVENTSEQ=1 and _aval=0 and cmiss(minvalue,randdt)=0 then aval= minvalue - randdt;
+		else if EVENTSEQ=1 and _aval=1 and cmiss(adt,randdt)=0 then aval=adt-randdt;
+		else if EVENTSEQ=1 and _aval=2 and cmiss(adt,randdt)=0 then aval=adt-randdt;
+		else if EVENTSEQ=2 and _aval=2 and cmiss(adt,randdt)=0 then aval=(adt-randdt)+1*10**(-10);
+		else if EVENTSEQ=1 and _aval=3 and cmiss(adt,randdt)=0 then aval=adt-randdt;
+		else if EVENTSEQ=2 and _aval=3 and cmiss(adt,randdt)=0 then aval=(adt-randdt)+1*10**(-10);
+		else if EVENTSEQ=3 and _aval=3 and cmiss(adt,randdt)=0 then aval=(adt-randdt)+2*10**(-10);
+	end;
+	if PARAMCD = "BOI" THEN DO;
+		if EVENTSEQ=1 and _aval=0 and nmiss(minvalue,tr01sdt)=0 then aval= minvalue - tr01sdt;
+		else if EVENTSEQ=1 and _aval=0.5 and cmiss(adt,tr01sdt)=0 then aval=adt-tr01sdt;
+		else if EVENTSEQ=1 and _aval=1 and cmiss(adt,tr01sdt)=0 then aval=adt-tr01sdt;
+		else if EVENTSEQ=2 and _aval=1 and cmiss(adt,tr01sdt)=0 then aval=(adt-tr01sdt)+1*10**(-10);
+		else if EVENTSEQ=1 and _aval=2 and cmiss(adt,tr01sdt)=0 then aval=adt-tr01sdt;
+		else if EVENTSEQ=2 and _aval=2 and cmiss(adt,tr01sdt)=0 then aval=(adt-tr01sdt)+1*10**(-10);
+		else if EVENTSEQ=3 and _aval=2 and cmiss(adt,tr01sdt)=0 then aval=(adt-tr01sdt)+2*10**(-10);
+		else if EVENTSEQ=4 and _aval=2 and cmiss(adt,tr01sdt)=0 then aval=(adt-tr01sdt)+3*10**(-10);
+		else if EVENTSEQ=1 and _aval=3 and cmiss(adt,tr01sdt)=0 then aval=adt-tr01sdt;
+		else if EVENTSEQ=2 and _aval=3 and cmiss(adt,tr01sdt)=0 then aval=(adt-tr01sdt)+1*10**(-10);
+		else if EVENTSEQ=3 and _aval=3 and cmiss(adt,tr01sdt)=0 then aval=(adt-tr01sdt)+2*10**(-10);
+		else if EVENTSEQ=4 and _aval=3 and cmiss(adt,tr01sdt)=0 then aval=(adt-tr01sdt)+3*10**(-10);
+		else if EVENTSEQ=5 and _aval=3 and cmiss(adt,tr01sdt)=0 then aval=(adt-tr01sdt)+4*10**(-10);
+		else if EVENTSEQ=6 and _aval=3 and cmiss(adt,tr01sdt)=0 then aval=(adt-tr01sdt)+5*10**(-10);
+	end;
+run;
+
+
+
+
+
+%adam_dataset_update(
+	ds=&DSETNAME,
+	libin=work,
+	libout=output,
+	adsllib=adb,
+	addcomvar=Y,
+	addseq=,
+	dropinfmt=Y,
+	mapspecfile=&ADAM_SPEC,
+	maploc=&ADAM_SPEC_LOC,
+	debug=N
+	);
+	
+	
+**Generate Value Level Metadata values for the ad<xx> dataset**;
+%* dod_vlm(        
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&ADAM_SPEC_LOC,
+	specname=&ADAM_SPEC,
+	debug=N
+	);
+
+**Generate Enhanced Controlled Terminology for the ad<xx> dataset**;
+%* dod_enhcd_ct(            
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&ADAM_SPEC_LOC,
+	specname=&ADAM_SPEC,
+	map_ct_nm=,
+	map_ct_loc=,
+	debug=N
+	);

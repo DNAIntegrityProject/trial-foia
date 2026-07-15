@@ -1,0 +1,921 @@
+*************************************************************************
+*        CLIENT: MODMRNA  
+*      PROTOCOL:  mRNA-1273-P201 
+*       PURPOSE:  
+*   INPUT FILES:  _adsl_vars_.sas/_adis_vars_.sas, sdtm
+*  OUTPUT FILES: PP_Listing.dat/xls format 
+*   USAGE NOTES:  
+************************************************************************* 
+*  Copyright 2020 PPD
+*  All Rights Reserved. 
+*************************************************************************;
+
+/* DELETE this comment block before writing code.
+   Reference: http://wiki.ppdi.com/BioWiki/index.php/SAS_Program_Headers
+*/
+*options mprint;
+
+%include ".\_adsl_vars_.sas";
+%let adslvar=tr01sdt dose2dt tr01sdtm tr01edtm dose1fl dose2fl eosdt dthdt randfl sex;
+
+data adsl;
+  set final;
+run;
+
+/*
+data z;
+  set adsl;
+   by usubjid;
+    if first.usubjid then s=-1;
+  else s=0;
+  keep usubjid subjid s;
+  run;*/
+%include ".\_adis_vars_.sas";
+
+/*
+data z;
+  set final;
+  run;
+
+  proc sql;
+   create table z as
+      select distinct dtype,iscat,istestcd,avisit,ady,isstresc
+	      from final;
+		  quit;*/
+
+data adis;
+  set final;
+
+  ***    if missing(avisit) then avisit="Baseline";
+if ^missing(avisit) and ^missing(usubjid);
+if (index(upcase(iscat),'NEUTRALIZING') and istestcd='MNET' and lloq=160) or (index(upcase(iscat),'NEUTRALIZING') and istestcd='MN50' and lloq=318.46) then delete;
+
+keep ISC: usubjid ady avisit vis: paramcd ISSTRESC dtype adt aval paramtyp;
+run;
+
+
+
+ data adis;
+    set adis;
+ 
+	if iscat="Serum SARS-CoV-2 Binding Antibodies" then do; iscat1="BIND";   iscat2="BIND_DY"; iscat3="BIND_DT"; end;
+	else if iscat="Serum SARS-CoV-2 Neutralizing Antibodies" then do;  iscat1="NEUT";   iscat2="NEUT_DY"; iscat3="NEUT_DT"; end;
+   /*istresc=isorres;*/
+	if missing(paramtyp) /*and indexc(ISsTRESC ,"0123456789") gt 0  aval>. */;
+	output;
+   /*  iscat="Serum SARS-CoV-2 Binding Antibodies";iscat1="BIND";   usubjid="";  iscat2="BIND_DY";  output;*/   /*!!!!!!!!!!!  remove later*/
+ run;
+
+
+
+ proc sort data=adis;
+    by usubjid  iscat adt  avisit;
+run;
+
+data adis;
+   set adis;
+   by usubjid  iscat avisit notsorted;
+    if first.avisit;
+ run;
+
+
+ proc sort data=adis;
+      by usubjid /*paramcd*/  avisit adt/* ady*/  /*VISITTPT:*/ ;
+
+ run;
+/**/
+/* data chk;*/
+/* set adis;*/
+/*      by usubjid  adt avisit ;*/
+/*if avisit ne '' then avisit_s=lag(avisit);*/
+/*run;*/
+
+/*data issue adt for Day 43 after Day 57 usubjid='mRNA-1273-P201-US203-1093'*/
+
+ proc transpose data=adis   out=adis_tr(drop=_name_);
+     by usubjid  avisit  /* ady  VISITTPT: */;
+   id iscat1;
+   var ISSTRESC;
+   where aval>.;
+	 run;
+ 
+
+	 
+ proc transpose data=adis   out=adis_tr2(drop=_name_);
+     by usubjid  avisit  /* ady  VISITTPT: */;
+   id iscat2;
+   var ady;
+	 run;
+ 
+
+ proc transpose data=adis   out=adis_tr3(drop=_name_);
+     by usubjid  avisit  /* ady  VISITTPT: */;
+   id iscat3;
+   var adt;
+	 run; 
+
+%revsupp(libin=TRANS
+       , libout=work
+       , ds=ds
+       , supp=suppds
+       , maploc=&G_PROJECTPATH.&G_TOPLEVEL.\Databases\Transformed 
+       , mapspec=&g_nickname._mapping_spec.xlsx
+       );
+
+	    	   %revsupp(libin=TRANS
+       , libout=work
+       , ds=dv
+       , supp=suppdv
+       , maploc=&G_PROJECTPATH.&G_TOPLEVEL.\Databases\Transformed 
+       , mapspec=&g_nickname._mapping_spec.xlsx
+       );
+
+	  /* %revsupp(libin=TRANS
+       , libout=work
+       , ds=dm
+       , supp=suppdm
+       , maploc=&G_PROJECTPATH.&G_TOPLEVEL.\Databases\Transformed 
+       , mapspec=&g_nickname._mapping_spec.xlsx
+       );
+
+
+
+	  */
+
+
+	  /* %revsupp(libin=TRANS
+       , libout=work
+       , ds=ie
+       , supp=suppie
+       , maploc=&G_PROJECTPATH.&G_TOPLEVEL.\Databases\Transformed 
+       , mapspec=&g_nickname._mapping_spec.xlsx
+       );
+	   quit;*/
+
+data ie;
+ set trans.ie;
+     keep usubjid subjid;
+
+run;
+
+
+proc sort data=ie nodupkey;
+   by usubjid;
+run;
+
+
+data pp_listing_dm;
+    set trans.dm;
+    keep usubjid subjid ;
+run;
+
+
+data pp_listing_ds;
+    set ds;
+	if ENROLLYN="N" or DSSCAT='SCREEN FAILURE' then delete;
+  ***  keep usubjid subjid cohort;
+run;
+
+
+proc sort data=pp_listing_ds nodupkey;
+   by usubjid;
+run;
+
+data pp_listing;
+   merge pp_listing_ds(in=a drop=subjid) pp_listing_dm ;
+     by usubjid ;
+	 if a;
+run;
+ 
+data pp_listing;
+   merge pp_listing(in=ina) ie(in=inb);
+   by usubjid subjid;
+   if inb then iefl="N";
+   else iefl="Y";
+   if ina;
+run;
+
+
+/*Positive PCR*/
+
+data mbpos;
+	set trans.mb;
+	if mborres in ('DETECTED', 'POSITIVE') and mbtestcd='SARSCOV2';
+	mbdt=input(substr(mbdtc,1,10), yymmdd10.);
+	format mbdt date9.;
+run;
+
+data aepos;
+	set trans.ae;
+	if AEDECOD in ('COVID-19', 'Asymptomatic COVID-19', 'SARS-CoV-2 test positive');
+	mbdt=input(substr(aestdtc,1,10), yymmdd10.);
+	format mbdt date9.;
+run;
+
+
+data pos;
+	set mbpos aepos (in=a);
+	if a then mborres=aedecod;
+run;
+
+proc sort data=pos nodupkey;
+	by usubjid;
+run;
+ 
+proc format;
+   value $vis
+      "1"="Baseline"
+      "4"="Day 15"
+      "5"="Day 29"
+      "7"="Day 43"
+	  "8"="Day 57"
+	  "9"= "Day 209"
+	  "10"="Day 394"
+         ;
+   run;
+
+
+data vist_templ(drop=VISITTPTN_  );
+   set adsl(keep=usubjid);
+   length avisit $50;
+            do VISITTPTN_  ="1 ","4","5","7","8","9","10";
+                      _VISITTPT=put(VISITTPTN_,$vis.);
+                      _VISITTPTN=input(VISITTPTN_,best.);
+					  avisit=_VISITTPT;
+					   VISITTPT =_VISITTPT;
+ VISITTPTN =_VISITTPTN;
+				output;
+            end;
+        			
+run;
+
+proc sort data=adsl;
+     by usubjid ;
+run;
+ 
+proc sort data=vist_templ;
+     by usubjid avisit;
+run;
+ 
+
+data adsl_vis;
+   merge adsl (drop=_: STUDYID DOMAIN  /*TR01SDTM*/ in=adsl) vist_templ ;
+     by usubjid;
+	 if adsl;
+run;
+
+ 
+
+data adis_tr_sum;
+  merge adis_tr adis_tr2 adis_tr3;
+    by usubjid  avisit;
+	run;
+
+
+ 
+
+data adsl_adis;
+   merge adsl_vis ( in=adsl)   adis_tr_sum ;
+     by usubjid avisit;
+	 if adsl;
+run;
+
+
+data pp_listing;
+  set pp_listing;
+drop      DSREFID  DSDECOD  ENROLLYN  DSSCAT  /*avisit  _VISITTPT
+ _VISITTPTN  VISITTPT VISITTPTN */;
+  run;
+
+
+
+
+data adsl_adis_vis;
+    merge adsl_adis (in=inadsl) /*vist_templ*/ pp_listing (in=inpp);
+
+   by usubjid subjid ;
+   if inadsl;
+run;
+
+data adsl_adis_vis;
+    merge adsl_adis_vis (in=inadsl) pos (keep=usubjid  mbdt mborres);
+
+   by usubjid  ;
+   if inadsl;
+run;
+
+
+data ve;
+ set trans.ve;
+ d29="Y";
+ if find(upcase(visit),"DAY 29");
+ keep usubjid visit vestdtc d29;
+ run;
+
+ data adsl_adis_vis;
+    merge adsl_adis_vis ve;
+	by usubjid;
+	run;
+
+data adsl_adis_vis;
+length DOSE2FL $1;
+   set adsl_adis_vis;
+        VISITTPT =_VISITTPT;
+  VISITTPTN =_VISITTPTN;
+
+  if ^missing(bind) or ^missing(neut) then DVISFL="N";
+  else DVISFL="Y";
+/*if VISITTPTN <=5 then DOSE2FL="NA";*/
+ 
+
+/*
+Refer to ADSL for DOSE2DT and TR01SDT for derivation:  
+ 
+for subjects who don't have record in VE where VE.VISIT contains 'Day 29', use the following window for Day 29: 
+"Y" if ADSL.DOSE2DT is >=ADSL.TR01SDT+25 and <=ADSL.TR01SDT+35; 
+for subjects who have record in VE where VE.VISIT contains 'Day 29', use the following window for Day 29: 
+"Y" if ADSL.DOSE2DT is >=ADSL.TR01SDT+25 and <=ADSL.TR01SDT+49 (-3/+21);
+"N" otherwise
+(2nd vaccination should be 29 + 7/- 3 days after the first vaccination);
+*/
+ 
+if missing(d29) and DOSE2DT ge TR01SDT+25 and DOSE2DT le TR01SDT+35 then PDOS2WFL="Y";
+else if ^missing(d29) and DOSE2DT ge TR01SDT+25 and DOSE2DT le TR01SDT+49 then PDOS2WFL="Y";
+else PDOS2WFL="N";
+
+ /*
+ if VISITTPTN <=5 then PDOS2WFL="NA";
+ else if DOSE2DT >=TR01SDT+25 and DOSE2DT<=TR01SDT+35 then PDOS2WFL="Y";
+ else PDOS2WFL="N";
+ */
+ if /*indexc(ISSTRESC ,"0123456789") gt 0  and  ISCAT='Serum SARS-CoV-2 Binding Antibodies'*/ ^missing(bind) then PBABISFL="Y";
+ else  PBABISFL="N";
+
+
+  if /*indexc(ISSTRESC ,"0123456789") gt 0 and  ISCAT='Serum SARS-CoV-2 Neutralizing Antibodies'*/ ^missing(neut)  then PNABISFL="Y";
+ else  PNABISFL="N";
+
+/*if visitdy=1*/
+/*ady=visitdy;*/ /*remove later*/
+
+ /*if ^missing(bind) and AVISIT="Baseline" then bind_dy=1;  
+ if ^missing(neut) and AVISIT="Baseline" then neut_dy=1;*/ 
+
+
+ 
+if nmiss(bind_dt,DOSE2DT)=0 then spadt_b=bind_dt-DOSE2DT+1;
+if nmiss(neut_dt,DOSE2DT)=0 then spadt_n=neut_dt-DOSE2DT+1;
+
+if /*ISCAT='Serum SARS-CoV-2 Binding Antibodies'*/ ^missing(bind_dy) and ^missing(avisit) then do;
+	if AVISIT="Baseline" and bind_dy=1 then PBABISW="Y";
+	else if  AVISIT="Day 15" and 12 <= bind_dy<= 18 then PBABISW="Y" ; 
+	else if AVISIT="Day 29" and missing(d29) and 26 <= bind_dy <= 36  then PBABISW="Y";
+	else if AVISIT="Day 29" and ^missing(d29) and 26 <= bind_dy <= 50  then PBABISW="Y";
+
+
+	else if  AVISIT="Day 43"  and ^missing(spadt_b) and   12 <= spadt_b<= 18  then PBABISW="Y";
+	else if   AVISIT="Day 57" and ^missing(spadt_b) and   26 <=spadt_b <= 36 then PBABISW="Y";
+	else if   AVISIT="Day 209"  and ^missing(spadt_b)  and   167 <=spadt_b <= 195 then PBABISW="Y";
+	else if AVISIT="Day 394"  and ^missing(spadt_b)  and 352 <=spadt_b <= 380 then PBABISW="Y";
+	else PBABISW="N";
+
+	if cov19bl ne 'Detected' and bind_dt>=mbdt>.  then POSCOVFL='Y';
+end;
+ 
+
+if /*ISCAT='Serum SARS-CoV-2 Binding Antibodies'*/ ^missing(neut_dy) then do;
+		if AVISIT="Baseline" and neut_dy=1 then PNABISW="Y";
+		else if  AVISIT="Day 15" and 12 <= neut_dy<= 18 then PNABISW="Y" ;
+		else if AVISIT="Day 29" and missing(d29) and 26 <= neut_dy <= 36  then PNABISW="Y";
+		else if AVISIT="Day 29" and ^missing(d29) and 26 <= neut_dy <= 50  then PNABISW="Y";
+		else if  AVISIT="Day 43"  and ^missing(spadt_n)  and /*40 <= bind_dy <= 46*/ 12 <= spadt_n <= 18  then PNABISW="Y";
+		else if   AVISIT="Day 57"  and ^missing(spadt_n)  and /*54 <= bind_dy <= 64*/ 26 <=spadt_n<= 36 then PNABISW="Y";
+		else if   AVISIT="Day 209"  and ^missing(spadt_n)  and /*195 <= bind_dy <= 223*/ 167 <= spadt_n<= 195 then PNABISW="Y";
+		else if AVISIT="Day 394"  and ^missing(spadt_n)  and /*380 <= bind_dy <= 408*/ 352 <= spadt_n<= 380 then PNABISW="Y";
+		else PNABISW="N";
+
+		if cov19bl ne 'Detected' and neut_dt>=mbdt>.  then POSCOVFL='Y';
+end;
+
+
+
+if missing(PNABISW) then PNABISW="N";
+if missing(PBABISW)  then PBABISW="N";
+if missing(POSCOVFL) and (neut_dt>. OR bind_dt>.) then POSCOVFL="N";
+
+ keep   /*NABISW PBABISW  DOSE2DT bind_dy neut_dy avisit spadt_n spadt_b mbdt bind_dt neut_dt*/
+ PNABISW
+ PBABISW
+FASBABFL
+FASNABFL
+
+
+PNABISFL
+ PBABISFL
+  
+
+
+PDOS2WFL
+DOSE2FL PDOS2WFL
+USUBJID
+SUBJID
+COHORT
+ VISITTPT 
+ VISITTPTN 
+DVISFL
+IEFL
+COV19BL
+DOSE1FL
+avisit bind_dy neut_dy
+POSCOVFL
+sentlfl
+
+;
+
+
+run;
+
+
+proc sort data= adsl_adis_vis (rename=(poscovfl=poscovfl_));
+by usubjid visittptn;
+run;
+
+data adsl_adis_vis;
+set adsl_adis_vis;
+retain poscovfl;
+if poscovfl_ ne '' then poscovfl=poscovfl_;
+run;
+
+
+
+proc sort data=dv out=dv1(keep=usubjid sevdes spectpt);
+	by usubjid sevdes spectpt; 
+	where sevdes in ('3 - Exclude from per-protocol analysis set only'
+					 '4 - Exclude from bAb per-protocol analysis set only' 
+					 '5 - Exclude from nAb per-protocol analysis set only');
+run;
+
+data dv2; 
+	set dv1; 
+	if index(spectpt,'Baseline')>0 then tptn = 1; 
+	if index(spectpt,'Day 15')>0 then tptn = 4;
+	if index(spectpt,'Day 29')>0 then tptn = 5; 
+	if index(spectpt,'Day 43')>0 then tptn = 7; 
+	if index(spectpt,'Day 57')>0 then tptn = 8; 
+	if index(spectpt,'Day 209')>0 then tptn = 9; 
+	if index(spectpt,'Day 394')>0 then tptn = 10; 
+	if index(spectpt, 'Exclude from all visits') then tptn = 99;
+
+	if index(upcase(spectpt),'AFTER VISIT DAY 15')>0 then tptn = 4.01;
+	if index(upcase(spectpt),'AFTER VISIT DAY 29')>0 then tptn = 5.01; 
+	if index(upcase(spectpt),'AFTER VISIT DAY 43')>0 then tptn = 7.01; 
+	if index(upcase(spectpt),'AFTER VISIT DAY 57')>0 then tptn = 8.01; 
+	if index(upcase(spectpt),'AFTER VISIT DAY 209')>0 then tptn = 9.01; 
+	if index(upcase(spectpt),'AFTER VISIT DAY 394')>0 then tptn = 10.01;
+run;
+
+**EXCLUSION FROM bAb DUE TO STUDY DEVIATIONS;
+
+proc transpose data=dv2 out=babdv(drop=_name_) prefix=babtpt;
+	where sevdes in ('3 - Exclude from per-protocol analysis set only'
+					 '4 - Exclude from bAb per-protocol analysis set only');
+	by usubjid;
+	var tptn;
+run;
+
+
+data adsl_adis_vis;
+     merge  adsl_adis_vis(in=inm)  babdv;
+	 by usubjid;
+	 array babdv babtpt:;
+	  do i = 1 to dim(babdv);
+	    if babdv(i) ne . and index(put(babdv(i), best.),'.')>0 then do; 
+		  if VISITTPTN > input(scan(put(babdv(i), best.),2,'.'), best.) then PBABPDFL = "Y";
+		end;
+	    else if babdv(i)=99 then PBABPDFL = 'Y'; 
+		else if babdv(i)=VISITTPTN then PBABPDFL = 'Y';
+
+		if PBABPDFL = "" then PBABPDFL = "N";
+		*else PBABPDFL = 'N';
+	  end;
+run;
+
+**EXCLUSION FROM nAb DUE TO STUDY DEVIATIONS;
+
+proc transpose data=dv2 out=nabdv(drop=_name_) prefix=nabtpt;
+	where sevdes in ('3 - Exclude from per-protocol analysis set only'
+					 '5 - Exclude from nAb per-protocol analysis set only');
+	by usubjid;
+	var tptn;
+run;
+
+data adsl_adis_vis;
+     merge  adsl_adis_vis(in=inm)  nabdv;
+	 by usubjid;
+	 array nabdv nabtpt:;
+	  do j = 1 to dim(nabdv);
+	    if nabdv(j) ne . and index(put(nabdv(j), best.),'.')>0 then do; 
+		  if VISITTPTN > input(scan(put(nabdv(j), best.),2,'.'), best.) then PNABPDFL = "Y";
+		end;
+	    else if nabdv(j)=99 then PNABPDFL = 'Y'; 
+		else if nabdv(j)=VISITTPTN then PNABPDFL = 'Y';
+
+		if PNABPDFL = "" then PNABPDFL = "N";
+		*else PNABPDFL = 'N';
+	  end;
+run;
+
+
+
+proc sort data=adsl_adis_vis;
+    by usubjid avisit;
+run;
+/**/
+/*data adsl_adis_vis;*/
+/*     merge  adsl_adis_vis(in=inm) PBABPDFL PNABPDFL;*/
+/*	 by usubjid avisit;*/
+/*	  if inm;*/
+/*run;*/
+/**/
+data adsl_adis_vis;
+ set adsl_adis_vis;
+ if missing(PBABPDFL) then PBABPDFL="N";
+ if missing(PNABPDFL) then PNABPDFL="N";
+run;
+
+
+
+data _PBABISFL_;
+  set adsl_adis_vis;
+    if  PBABISFL="Y" then _PBABISFL_="Y";
+    else _PBABISFL_="N";
+
+       keep usubjid _PBABISFL_ avisit /*iefl PBABPDFL*/;
+  run;
+
+  proc sort data= _PBABISFL_;
+     by usubjid avisit _PBABISFL_;
+	 run;
+
+	 data _PBABISFL_;
+	    set _PBABISFL_;
+	     by usubjid avisit _PBABISFL_;
+          if last._PBABISFL_;
+	 run;
+
+
+	 proc sort data=adsl_adis_vis;
+            by usubjid  avisit;
+	 run;
+
+data adsl_adis_vis;
+   merge  adsl_adis_vis _PBABISFL_;
+    by usubjid  avisit;
+run;
+
+data adsl_adis_vis;
+  set adsl_adis_vis;
+    if /*IEFL="Y" and*/ DOSE1FL="Y" and DOSE2FL="Y" and PDOS2WFL="Y" and PBABISW="Y" and FASBABFL="Y" and PBABPDFL="N" and COV19BL ne "Detected" and POSCOVFL ne 'Y' then PVSBABFL="Y";
+	else  PVSBABFL="N";
+run;
+ 
+
+
+data _PNABISFL_;
+  set adsl_adis_vis;
+    if  PNABISFL="Y" then _PNABISFL_="Y";
+    else _PNABISFL_="N";
+
+       keep usubjid _PNABISFL_ avisit /*iefl PNABPDFL*/;
+  run;
+
+  proc sort data= _PNABISFL_;
+     by usubjid avisit _PNABISFL_;
+	 run;
+
+
+	 data _PNABISFL_;
+	    set _PNABISFL_;
+	     by usubjid avisit _PNABISFL_;
+          if last._PNABISFL_;
+	 run;
+
+ proc sort data=adsl_adis_vis;
+            by usubjid  avisit;
+	 run;
+	 proc sort data=_PNABISFL_;
+               by usubjid avisit;
+	 run;
+
+data adsl_adis_vis;
+   merge  adsl_adis_vis _PNABISFL_;
+    by usubjid avisit;
+run;
+
+data adsl_adis_vis;;
+  set adsl_adis_vis;;
+  if /*IEFL="Y" and*/ DOSE1FL="Y" and DOSE2FL="Y" and PDOS2WFL="Y" and _PNABISFL_="Y" and PNABISW="Y" and FASNABFL="Y" and PNABPDFL="N" and COV19BL ne "Detected" and POSCOVFL ne 'Y' then PVSNABFL="Y";
+  else PVSNABFL="N";
+
+  run;
+
+ 
+
+	proc sql;
+        create table PB_flag as 
+		    select distinct usubjid, count(distinct PVSBABFL) as cnt_PVSBABFL,PVSBABFL as PVSBABFL_u,avisit
+			   from adsl_adis_vis
+			     group by usubjid,avisit;
+				 quit;
+
+
+data PB_flag;
+   set PB_flag;
+    if  cnt_PVSBABFL=1 and PVSBABFL_u="N";
+	keep usubjid avisit PVSBABFL_u;
+run;
+				 	proc sql;
+        create table PN_flag as 
+		    select distinct usubjid, count(distinct PVSNABFL) as cnt_PVSNABFL, PVSNABFL as PVSNABFL_u,avisit
+			   from adsl_adis_vis
+			     group by usubjid,avisit;
+				 quit;
+
+				 data PN_flag;
+                   set PN_flag;
+				     if cnt_PVSNABFL=1 and  PVSNABFL_u="N";
+					 keep usubjid PVSNABFL_u avisit;
+				 run;
+
+
+data adsl_adis_vis;
+  merge adsl_adis_vis PB_flag PN_flag;
+  by usubjid avisit;
+  run;
+
+
+
+  data adsl_adis_vis;
+     set adsl_adis_vis;
+	 length r34 r56 PBABREAS PNABREAS  $200;
+    if PVSBABFL_u="N" then do;
+        *if IEFL="N" then reason1="Did not meet all eligibility criteria";
+		if DOSE1FL="N" then  reason2="Did not receive Vaccination #1";
+			if DOSE2FL="N" then  reason3="Did not receive Vaccination #2";
+            if PDOS2WFL="N" then reason4="Vaccination #2 out of window"; 
+			if _PBABISFL_="N"  then reason5="There was no immunogenicity result at corresponding visit";
+			if PBABISW="N"  then reason6="Serum collection out of window";
+			if FASBABFL="N" then reason7="Not in Full Analysis Set";
+			if PBABPDFL="Y"  then  reason8="Other study deviation"; 
+			if COV19BL ="Detected" then reason9="COVID-19 infection at baseline";
+			if POSCOVFL='Y' then reason10="Post-baseline COVID-19 infection prior to the visit";
+		
+			r34=coalescec(reason3,reason4);
+            r56=coalescec(reason5,reason6);   
+/*               PBABREAS=catx("; ",reason1,reason2,r34,r56,reason7,reason8,reason9, reason10);*/
+			PBABREAS=catx("; ",reason2,r34,r56,reason7,reason8,reason9, reason10);
+
+	end;
+
+    
+
+
+    if PVSNABFL_u="N" then do;
+            *if IEFL="N" then reason1_="Did not meet all eligibility criteria";
+		    if DOSE1FL="N" then  reason2_="Did not receive Vaccination #1";
+			if DOSE2FL="N" then  reason3_="Did not receive Vaccination #2";
+            if PDOS2WFL="N" then reason4_="Vaccination #2 out of window"; 
+			if _PNABISFL_="N"  then reason5_="There was no immunogenicity result at corresponding visit";
+			if PNABISW="N"  then reason6_="Serum collection out of window";
+			if FASNABFL="N" then reason7_="Not in Full Analysis Set";
+			if PNABPDFL="Y"  then  reason8_="Other study deviation"; 
+			if  COV19BL ="Detected" then reason9_="COVID-19 infection at baseline";
+			if POSCOVFL='Y' then reason10_="Post-baseline COVID-19 infection prior to the visit";
+
+			r34_=coalescec(reason3_,reason4_);
+            r56_=coalescec(reason5_,reason6_);   
+/*            PNABREAS=catx("; ",reason1_,reason2_,r34_,r56_,reason7_,reason8_,reason9_, reason10_);*/
+            PNABREAS=catx("; ",reason2_,r34_,r56_,reason7_,reason8_,reason9_, reason10_);
+
+	end;
+
+   run;
+ 
+ 
+
+  /* data z;
+    set adsl_adis_vis; 
+	if usubjid in ("mRNA-1273-P201-US201-1007");
+
+keep  r: PVSNABFL_u PVSBABFL_u IEFL DOSE1FL DOSE2FL PDOS2WFL _PNABISFL_ PNABISW FASNABFL PNABPDFL COV19BL PNABREAS;
+   run;*/
+
+ data adsl_adis_vis;
+    set adsl_adis_vis (rename=(sentlfl=sentl));
+	length sentlfl $1;
+  	sentlfl=sentl;
+	drop sentl;
+run;
+
+proc sort data=adsl_adis_vis;
+   by usubjid VISITTPTN;
+run;
+
+data templt;
+  	attrib
+USUBJID  label="Usubjid" length=$25
+SUBJID  label="Subjid"  length=$9
+ 	
+COHORT	label ="Cohort" length =$48
+SENTLFL label="Sentinel Participant Flag" length=$1
+VISITTPT label="Visit Timepoint"	length =$50
+VISITTPTN  label="Visit Timepoint (N)"
+DVISFL	label="Dummy Visit Flag"	length =$1
+IEFL label="Meet all eligibility criteria"	length= $1
+COV19BL	label="Baseline COVID Infection"	length= $20
+DOSE1FL	label="Received Vaccination #1"	length= $1
+DOSE2FL	label="Received Vaccination #2" length=	$1
+PDOS2WFL label="Vaccination #2 within window"	length= $1
+POSCOVFL label="Post-baseline COVID Infection" length= $1
+PBABISFL label="bAb result (for at least 1 assay)" length=	$1
+PNABISFL label="nAb result (for at least 1 assay)"	length= $1
+PBABISW	label="Serum bAb collection within window"	length= $1
+PNABISW	label ="Serum nAb collection within window" length=	$1
+FASBABFL label="In bAb FAS" length=	$1
+FASNABFL label="In nAb FAS"	length= $1
+PBABPDFL label="Exclusion from bAb due to major PD" length=	$1
+PNABPDFL label="Exclusion from nAb due to major PD"	length= $1
+PVSBABFL label="bAb PP flag at each visit" length=	$1
+PVSNABFL label="nAb PP flag at each visit" length=	$1
+PBABREAS label="Reason exclusion from bAb PP"	length= $200
+PNABREAS  label="Reason exclusion from nAb PP"	length =$200;
+
+usubjid="";SUBJID="";COHORT="";SENTLFL="";VISITTPT="";VISITTPT="";VISITTPTN=.;DVISFL="";IEFL="";COV19BL="";DOSE1FL="";DOSE2FL="";
+PDOS2WFL=""; POSCOVFL=""; PBABISFL="";PNABISFL="";PBABISW="";PNABISW="";FASBABFL="";FASNABFL="";PBABPDFL="";PVSBABFL="";PVSNABFL="";PBABREAS="";PNABREAS="";
+PNABPDFL="";
+run;
+
+
+data final;
+    set templt adsl_adis_vis;
+	attrib
+USUBJID  label="Unique Subject Identifier" length=$25
+SUBJID  label="Subject Identifier for the Study"  length=$9
+COHORT	label ="Cohort" length =$48
+SENTLFL label="Sentinel Participant Flag" length=$1
+VISITTPT label="Visit Timepoint"	length =$50
+VISITTPTN  label="Visit Timepoint (N)"
+DVISFL	label="Dummy Visit Flag"	length =$1
+IEFL label="Meet all eligibility criteria"	length= $1
+COV19BL	label="Baseline COVID Infection"	length= $20
+DOSE1FL	label="Received Vaccination #1"	length= $1
+DOSE2FL	label="Received Vaccination #2" length=	$1
+PDOS2WFL label="Vaccination #2 within window"	length= $1
+POSCOVFL label="Post-baseline COVID Infection" length= $1
+PBABISFL label="bAb result (for at least 1 assay)" length=	$1
+PNABISFL label="nAb result (for at least 1 assay)"	length= $1
+PBABISW	label="Serum bAb collection within window"	length= $1
+PNABISW	label ="Serum nAb collection within window" length=	$1
+FASBABFL label="In bAb FAS" length=	$1
+FASNABFL label="In nAb FAS"	length= $1
+PBABPDFL label="Exclusion from bAb due to major PD" length=	$1
+PNABPDFL label="Exclusion from nAb due to major PD"	length= $1
+PVSBABFL label="bAb PP flag at each visit" length=	$1
+PVSNABFL label="nAb PP flag at each visit" length=	$1
+PBABREAS label="Reason exclusion from bAb PP"	length= $200
+PNABREAS  label="Reason exclusion from nAb PP"	length =$200;
+/*
+col1  label="Usubjid" length=$200
+col2  label="Subjid"  length=$200
+col3	label ="Cohort" length =$200
+col4 label="Visit Timepoint"	length =$50
+col5  label="Visit Timepoint (N)"
+col6	label="Dummy Visit Flag"	length =$1
+col7 label="Meet all eligibility criteria"	length= $1
+col8	label="Baseline COVID Infection"	length= $20
+col9	label="Received Vaccination #1"	length= $1
+col10	label="Received Vaccination #2" length=	$2
+col11 label="Vaccination #2 within window"	length= $2
+col12 label="bAb result (for at least 1 assay)" length=	$1
+col13 label="nAb result (for at least 1 assay)"	length= $1
+col14	label="Serum bAb collection within window"	length= $1
+col15	label ="Serum nAb collection within window" length=	$1
+col16 label="In bAb FAS" length=	$1
+col17 label="In nAb FAS"	length= $1
+col18 label="Exclusion from bAb due to major deviations" length=	$1
+col19 label="Exclusion from nAb due to major deviations"	length= $1
+col20 label="bAb PP flag at each visit" length=	$1
+col21 label="nAb PP flag at each visit" length=	$1
+col22 label="Reason exclusion from bAb PP"	length= $200
+col23  label="Reason exclusion from nAb PP"	length =$200;
+
+
+
+col1=USUBJID; 
+col2=SUBJID;
+col3=COHORT;
+col4=VISITTPT;
+col5=VISITTPTN;
+col6=DVISFL;
+col7=IEFL;
+col8=COV19BL;
+col9=DOSE1FL;
+col10=DOSE2FL;
+col11=PDOS2WFL;
+col12=PBABISFL;
+col13=PNABISFL;
+col14=PBABISW;
+col15=PNABISW;
+col16=FASBABFL;
+col17=FASNABFL;
+col18=PBABPDFL;
+col19=PNABPDFL;
+col20=PVSBABFL;
+col21=PVSNABFL;
+col22=PBABREAS;
+col23=PNABREAS;
+*/
+
+keep /* col1--col23*/
+USUBJID
+SUBJID
+COHORT
+SENTLFL
+VISITTPT
+VISITTPTN
+DVISFL
+/*IEFL*/
+COV19BL
+DOSE1FL
+DOSE2FL
+PDOS2WFL
+POSCOVFL
+PBABISFL
+PNABISFL
+PBABISW
+PNABISW
+FASBABFL
+FASNABFL
+PBABPDFL
+PNABPDFL
+PVSBABFL
+PVSNABFL
+PBABREAS
+PNABREAS
+;
+if missing(PBABPDFL) then PBABPDFL="N";
+if missing(PNABPDFL)  then PNABPDFL="N";
+if ^missing(usubjid);
+run;
+
+/*remove Day 15 for Day 57 IA*/
+data final;
+	set final;
+	if visittpt ne 'Day 15';
+run;
+ 
+proc sort data=final out=Per_Protocol_Analysis/*(keep=COL1-COL23)*/ ;
+	by USUBJID  VISITTPTN;
+run;
+data PP_Listing (label='Per Protocol Evaluation Listing');;
+   set Per_Protocol_Analysis;
+   run;
+
+data output.PP_List(label='Per Protocol Evaluation Listing');
+	set Per_Protocol_Analysis; 
+	rename VISITTPTN=VISITPTN;
+run;
+
+
+data foot;
+length usubjid $200;
+usubjid='';
+output;
+usubjid='Note: Subjects who have dosing error will be additionally excluded at ADaM level';
+output;
+run;
+
+data Per_Protocol_Analysis;
+	length usubjid $200;
+	set Per_Protocol_Analysis foot; 
+run;
+
+data _null_;
+call symput('tdate', compress(put(today(), date9.)));
+run;
+
+%put tdate = &tdate;
+
+** Output to EXCEL file ;
+libname dmrpt "&g_fullpath";
+
+%let footnote1 = Note: Subjects who have dosing error will be additionally excluded at ADaM level;
+
+*****************************************************************************
+*STEP 11: CALL THE PATIENTVIEW_TYPE_OUTPUT macro for outputting the report
+*****************************************************************************;
+
+%PatientView_Type_Output ( In_Data = output.pp_list, 
+			   Out_File =Moderna mRNA1273P201 per-protocol analysis from the First Lot &tdate,  			    			  
+                           Deliv_Type = E);
+

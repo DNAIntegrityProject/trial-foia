@@ -1,0 +1,345 @@
+*************************************************************************************************;
+* 
+*           CLIENT:  ModernaTX, Inc.
+*         PROTOCOL:  mRNA-1273-P301
+*
+*          PURPOSE: Create analysis dataset adttea
+*      
+*      INPUT FILES: SDTM data
+*     OUTPUT FILES: ADTTEA.sas7bdat
+*
+*      USAGE NOTES: 
+*      
+*************************************************************************************************;
+*  Copyright 2020 Pharmaceutical Product Development, Inc.
+*  All Rights Reserved. 
+*************************************************************************************************;
+
+options noquotelenmax;
+%include "madam.sas";
+
+**Assign global macro variable DSETNAME to reflect the name of the final ADaM dataset**;
+%global DSETNAME;
+%let dsetname = adttea;
+
+**INSERT CODE TO GENERATE DATASET**;
+
+proc format;
+    value $param 
+'TTCVD1'='Time to COVID-19 14 Days after Dose 2 (Days)'
+'TTCVD2'='Time to COVID-19 after Dose 2 (Days)'
+'TTCVD3'='Time to COVID-19 14 Days after Dose 1 (Days)'
+'TTCVD4'='Time to COVID-19 after Dose 1 (Days)'
+'TTCVD5'='Time to COVID-19 after Randomization (Days)'
+'TTCVD6'='Time to COVID-19 35 Days after Dose 2 (Days)'
+'TTCVDSE1'='Time to Severe COVID-19 14 Days after Dose 2 (Days)'
+'TTCVDSE2'='Time to Severe COVID-19 after Dose 2 (Days)'
+'TTCVDSE3'='Time to Severe COVID-19 14 Days after Dose 1 (Days)'
+'TTCVDSE4'='Time to Severe COVID-19 after Dose 1 (Days)'
+'TTCVDSE5'='Time to Severe COVID-19 after Randomization (Days)'
+'TTCVDSE6'='Time to Severe COVID-19 35 Days after Dose 2 (Days)'
+'TTCVDSD1'='Time to COVID-19 (Secondary Definition) 14 Days after Dose 2 (Days)'
+'TTCVDSD2'='Time to COVID-19 (Secondary Definition) after Dose 2 (Days)'
+'TTCVDSD3'='Time to COVID-19 (Secondary Definition) 14 Days after Dose 1 (Days)'
+'TTCVDSD4'='Time to COVID-19 (Secondary Definition) after Dose 1 (Days)'
+'TTCVDSD5'='Time to COVID-19 (Secondary Definition) after Randomization (Days)'
+'TTASYMP1'='Time to Asymptomatic SARS-CoV-2 Infection 14 Days after Dose 2 (Days)'
+'TTASYMP2'='Time to Asymptomatic SARS-CoV-2 Infection after Dose 2 (Days)'
+'TTASYMP3'='Time to Asymptomatic SARS-CoV-2 Infection 14 Days after Dose 1 (Days)'
+'TTASYMP4'='Time to Asymptomatic SARS-CoV-2 Infection after Dose 1 (Days)'
+'TTASYMP5'='Time to Asymptomatic SARS-CoV-2 Infection after Randomization (Days)'
+'TTASYMP6'='Time to Asymptomatic SARS-CoV-2 Infection 35 Days after Dose 2 (Days)'
+'TTINF1'='Time to SARS-CoV-2 Infection Regardless of Symptomatology or Severity 14 Days after Dose 2 (Days)'
+'TTINF2'='Time to SARS-CoV-2 Infection Regardless of Symptomatology or Severity after Dose 2 (Days)'
+'TTINF3'='Time to SARS-CoV-2 Infection Regardless of Symptomatology or Severity 14 Days after Dose 1 (Days)'
+'TTINF4'='Time to SARS-CoV-2 Infection Regardless of Symptomatology or Severity after Dose 1 (Days)'
+'TTINF5'='Time to SARS-CoV-2 Infection Regardless of Symptomatology or Severity after Randomization (Days)'
+'TTDTHCV1'='Time to Death Caused by COVID-19 14 Days after Dose 2 (Days)'
+'TTDTHCV2'='Time to Death Caused by COVID-19 after Dose 2 (Days)'
+'TTDTHCV3'='Time to Death Caused by COVID-19 14 Days after Dose 1 (Days)'
+'TTDTHCV4'='Time to Death Caused by COVID-19 after Dose 1 (Days)'
+'TTDTHCV5'='Time to Death Caused by COVID-19 after Randomization (Days)'
+'TTDEATH'='Time to All-Cause Death after Randomization (Days)'
+'TTCVD1B'='Time to COVID-19 14 Days after Dose 2 (Days) up to 53rd case'
+'TTCVDC1'='Time to COVID-19 (Prior Infection Censoring) 14 Days after Dose 2 (Days)'
+'TTCVDC2'='Time to COVID-19 (Prior Infection Censoring) after Dose 2 (Days)'
+'TTCVDC3'='Time to COVID-19 (Prior Infection Censoring) 14 Days after Dose 1 (Days)'
+'TTCVDC4'='Time to COVID-19 (Prior Infection Censoring) after Dose 1 (Days)'
+'TTCVDC5'='Time to COVID-19 (Prior Infection Censoring) after Randomization (Days)'
+'TTCVDC6'='Time to COVID-19 (Prior Infection Censoring) 35 Days after Dose 2 (Days)'
+'TCVDSVC1'='Time to Severe COVID-19 (Prior Infection Censoring) 14 Days after Dose 2 (Days)'
+'TCVDSVC2'='Time to Severe COVID-19 (Prior Infection Censoring) after Dose 2 (Days)'
+'TCVDSVC3'='Time to Severe COVID-19 (Prior Infection Censoring) 14 Days after Dose 1 (Days)'
+'TCVDSVC4'='Time to Severe COVID-19 (Prior Infection Censoring) after Dose 1 (Days)'
+'TCVDSVC5'='Time to Severe COVID-19 (Prior Infection Censoring) after Randomization (Days)'
+'TCVDSVC6'='Time to Severe COVID-19 (Prior Infection Censoring) 35 Days after Dose 2 (Days)'
+'TCVDSDC1'='Time to COVID-19 (Secondary Definition, Considering Scheduled RT-PCR and Prior Infection Censoring) 14 Days after Dose 2 (Days)'
+'TCVDSDC2'='Time to COVID-19 (Secondary Definition, Considering Scheduled RT-PCR and Prior Infection Censoring) after Dose 2 (Days)'
+'TCVDSDC3'='Time to COVID-19 (Secondary Definition, Considering Scheduled RT-PCR and Prior Infection Censoring) 14 Days after Dose 1 (Days)'
+'TCVDSDC4'='Time to COVID-19 (Secondary Definition, Considering Scheduled RT-PCR and Prior Infection Censoring) after Dose 1 (Days)'
+'TCVDSDC5'='Time to COVID-19 (Secondary Definition, Considering Scheduled RT-PCR and Prior Infection Censoring) after Randomization (Days)'
+'TTCVDC9'='Time to COVID-19 (Prior Infection Censoring) in Open Label Phase (Days)'
+'TCVDSVC9'='Time to Severe COVID-19 (Prior Infection Censoring) in Open Label Phase (Days)'
+	;
+run;
+
+data adsl;
+    set adb.adsl;
+	where FASFL='Y';
+run;
+
+
+data adeff;
+    set adb.adeff;
+	where PARCAT1='DERIVED PER ADJUDICATION';
+run;
+
+data __cvd53dt;
+    set adeff;
+	where ^missing(DOSE2DT);
+	if PARAMCD='COVIDA' and ANL01FL='Y' and ADT>=DOSE2DT+14>. and PPROTFL='Y';
+run;
+
+proc sort data=__cvd53dt; by ADT; run;
+
+%global cvd53dt;
+
+data _cvd53dt;
+    set __cvd53dt;
+	by ADT;
+	if _n_=53 then call symput('cvd53dt',put(ADT,best.));
+run;
+
+
+%macro dev_tte(effcd=,ttecd=,event=,aperiod=);
+
+%if &cvd53dt. eq  %then %do;
+proc sql noprint; select distinct put(min(CUTOFFDT,EFFCODT),best.) into :cvd53dt from adb.adsl; quit;
+%end;
+
+proc sql noprint;
+    create table _adeff_&effcd. as
+	select distinct USUBJID, SUBJID, ADT as _event_dt, PCRDT, APERIOD
+	from adeff
+	where PARAMCD="&effcd." and ANL01FL='Y' and ^missing(ADT) 
+        %if &ttecd eq TTCVD1B %then %do; and .<ADT<=&cvd53dt. %end;
+		 %if &aperiod. eq 1 and &ttecd ne TTCVD1B %then %do; and APERIOD=1 %end;
+	group by USUBJID, SUBJID
+	having ADT=min(ADT)
+	order by USUBJID, SUBJID
+	;
+	%if &ttecd eq TTASYMP %then %do;
+    create table __covid as
+	select distinct USUBJID, SUBJID, ADT as _covid_dt
+	from adb.adeff
+	where PARAMCD in ('COVIDA','COVIDSDS') and ANL01FL='Y' and ^missing(ADT) %if &aperiod. eq 1 %then %do; and APERIOD=1 %end;
+	group by USUBJID, SUBJID
+	having ADT=min(ADT)
+	order by USUBJID, SUBJID
+	;
+	%end;
+
+	***positive RT-PCR date;
+	create table _PCR_pos as
+	select distinct USUBJID, min(input(scan(MBDTC,1,'T'),yymmdd10.)) as _PCR_pos_dt
+	from trans.MB
+	%if &aperiod. eq 1 %then %do;
+	where MBTESTCD='SARSCOV2' and upcase(MBSTRESC) in ('DETECTED','POSITIVE') and VISIT='Visit 2 Day 29' and ^missing(MBDTC)
+	%end;
+	%if &aperiod. eq 2 %then %do;
+	where MBTESTCD='SARSCOV2' and upcase(MBSTRESC) in ('DETECTED','POSITIVE') and VISIT in ('Visit 2 Day 29','Participant Decision Visit / OL-D1') and ^missing(MBDTC)
+	%end;
+	group by USUBJID
+	order by USUBJID
+	;
+	create table PCR_pos as
+	select *
+	from _PCR_pos
+	where USUBJID not in (select distinct USUBJID
+	from adb.adeff
+	where PARCAT1='DERIVED PER SAP' and PARAMCD='COVIDS' and PCRD29FL='Y')
+	order by USUBJID
+	;
+
+	***positive Elecsys date;
+	create table ELEC_pos as
+	select distinct USUBJID, min(input(scan(ISDTC,1,'T'),yymmdd10.)) as _ELEC_pos_dt
+	from trans.IS
+	%if &aperiod. eq 1 %then %do;
+	where ISTESTCD='SARSCOV2' and upcase(ISSTRESC) in ('POSITIVE') 
+    and VISIT in ('Visit 2 Day 29','Visit 3 Day 57','Visit4 Day 209') and ^missing(ISDTC)
+	%end;
+	%if &aperiod. eq 2 %then %do;
+	where ISTESTCD='SARSCOV2' and upcase(ISSTRESC) in ('POSITIVE') 
+    and VISIT in ('Visit 2 Day 29','Visit 3 Day 57','Visit4 Day 209','Participant Decision Visit / OL-D1','OL-D29','OL-D57') 
+    and ^missing(ISDTC)
+	%end;
+	group by USUBJID
+	order by USUBJID
+	;
+
+	create table _subj_early as
+	select distinct USUBJID, 'Y' as _subj_early
+	from adb.adeff
+	where PARAMCD in ('COVIDS','COVIDA','INFECT') and .< ADT< AP02SDT
+	order by USUBJID
+	;
+
+	create table adtte0_&ttecd. as
+	select a.*, b._event_dt, b.APERIOD, b.PCRDT, &cvd53dt. as CVD53DT %if &ttecd eq TTASYMP %then %do; ,c._covid_dt %end; ,d._PCR_pos_dt, e._ELEC_pos_dt, f._subj_early
+	from adsl%if &aperiod. eq 2 %then %do;(where=(^missing(AP02SDT) and AP02SDT<=EFFCODT and upcase(SCOV2BL)^='POSITIVE')) %end;
+    as a left join _adeff_&effcd. as b
+	on a.USUBJID=b.USUBJID and a.SUBJID=b.SUBJID
+	%if &ttecd eq TTASYMP %then %do;
+	left join __covid as c
+	on a.USUBJID=c.USUBJID and a.SUBJID=c.SUBJID
+	%end;
+	left join PCR_pos as d
+	on a.USUBJID=d.USUBJID
+	left join ELEC_pos as e
+	on a.USUBJID=e.USUBJID
+	left join _subj_early as f
+	on a.USUBJID=f.USUBJID
+	order by USUBJID, SUBJID
+	;
+quit;
+
+data adtte1_&ttecd.;
+    length PARAMCD $8;
+    set adtte0_&ttecd.;
+	%if &ttecd ne TTCVD1B %then %do;
+	     %if &aperiod. eq 1 %then %do;
+	     do tpt=1 to 6;
+	     %end;
+	     %if &aperiod. eq 2 %then %do;
+	     if _subj_early='Y' then delete;
+	     do tpt=9;
+	     %end;
+	     PARAMCD="&ttecd."||strip(put(tpt,best.));
+	     output;
+	end;
+	%end;
+	%else %do;
+	    tpt=1; PARAMCD='TTCVD1B'; output;
+	%end;
+run;
+
+data adtte_&ttecd.&aperiod.;
+    length EVNTDESC $200;
+    set adtte1_&ttecd.;
+	if .<_event_dt<=min(of DTHDT,EOSDT,CUTOFFDT,EFFCODT) then do;
+	    if tpt=1 then do;
+	        if .<DOSE2DT+14<=_event_dt then do; ADT=_event_dt; CNSR=0; EVNTDESC="&event."; end;
+		    else if DOSE2DT+14>_event_dt>. or missing(DOSE2DT) then do; ADT=_event_dt; CNSR=1; EVNTDESC="Early &event."; end;
+	    end;
+	    else if tpt=2 then do;
+	        if .<DOSE2DT<=_event_dt then do; ADT=_event_dt; CNSR=0; EVNTDESC="&event."; end;
+		    else if DOSE2DT>_event_dt>. or missing(DOSE2DT) then do; ADT=_event_dt; CNSR=1; EVNTDESC="Early &event."; end;
+	    end;
+	    else if tpt=3 then do;
+	        if .<TR01SDT+14<=_event_dt then do; ADT=_event_dt; CNSR=0; EVNTDESC="&event."; end;
+		    else if TR01SDT+14>_event_dt>. then do; ADT=_event_dt; CNSR=1; EVNTDESC="Early &event."; end;
+	    end;
+	    else if tpt=4 then do;
+	        if .<TR01SDT<=_event_dt then do; ADT=_event_dt; CNSR=0; EVNTDESC="&event."; end;
+		    else if TR01SDT>_event_dt>. then do; ADT=_event_dt; CNSR=1; EVNTDESC="Early &event."; end;
+	    end;
+	    else if tpt=5 then do;
+	        if .<RANDDT<=_event_dt then do; ADT=_event_dt; CNSR=0; EVNTDESC="&event."; end;
+	    end;
+	    else if tpt=6 then do;
+	        if .<DOSE2DT+35<=_event_dt then do; ADT=_event_dt; CNSR=0; EVNTDESC="&event."; end;
+		    else if DOSE2DT+35>_event_dt>. or missing(DOSE2DT) then do; ADT=_event_dt; CNSR=1; EVNTDESC="Early &event."; end;
+	    end;
+	    else if tpt=9 then do;
+	        if APERIOD=2 then do; ADT=_event_dt; CNSR=0; EVNTDESC="&event."; end;
+		    else do; ADT=_event_dt; CNSR=1; EVNTDESC="Early &event."; end;
+	    end;
+	end;
+	%if &ttecd eq TTASYMP %then %do;
+		if missing(ADT) and .<_covid_dt<=min(of DTHDT,EOSDT,CUTOFFDT,EFFCODT) then do; ADT=_covid_dt; CNSR=1; EVNTDESC="Symptomatic SARS-CoV-2 Infection"; end;
+	%end;
+	%if &ttecd eq TTCVDC or &ttecd eq TCVDSVC or &ttecd eq TCVDSDC %then %do;
+		if .<_PCR_pos_dt<ADT or .<_ELEC_pos_dt<ADT and ^missing(ADT) then do; ADT=min(_PCR_pos_dt,_ELEC_pos_dt); CNSR=1; EVNTDESC="Infection Prior to &event."; end;
+	%end;
+	if missing(ADT) then do;
+	%if &aperiod. eq 1 %then %do;
+	    ADT=min(of DTHDT,EOSDT,EFFCODT 
+        %if &ttecd eq TTCVD1B %then %do; ,CVD53DT %end;
+        %if &ttecd ne TTCVD1B %then %do; ,AP01EDT %end;
+        ); CNSR=1; EVNTDESC="No &event.";
+	%end;
+	%if &aperiod. eq 2 %then %do;
+	    ADT=min(of DTHDT,EOSDT,CUTOFFDT,EFFCODT); CNSR=1; EVNTDESC="No &event.";
+	%end;
+	end;
+run;
+%mend dev_tte;
+%dev_tte(effcd=COVIDA,ttecd=TTCVD,aperiod=1,event=%str(COVID-19));
+%dev_tte(effcd=COVIDSVA,ttecd=TTCVDSE,aperiod=1,event=%str(Severe COVID-19));
+%dev_tte(effcd=ASYMPINA,ttecd=TTASYMP,aperiod=1,event=%str(Asymptomatic SARS-CoV-2 Infection));
+%dev_tte(effcd=COVIDA,ttecd=TTCVD1B,aperiod=1,event=%str(COVID-19));
+%dev_tte(effcd=COVIDA,ttecd=TTCVDC,aperiod=1,event=%str(COVID-19 (Prior Infection Censoring)));
+%dev_tte(effcd=COVIDA,ttecd=TTCVDC,aperiod=2,event=%str(COVID-19 (Prior Infection Censoring)));
+%dev_tte(effcd=COVIDSVA,ttecd=TCVDSVC,aperiod=1,event=%str(Severe COVID-19 (Prior Infection Censoring)));
+%dev_tte(effcd=COVIDSVA,ttecd=TCVDSVC,aperiod=2,event=%str(Severe COVID-19 (Prior Infection Censoring)));
+
+data _adtte_all;
+    length PARAM $200;
+    set adtte_:;
+	PARAM=put(PARAMCD,$param.);
+	if index(PARAMCD,'9') then do; STARTDT=AP02SDT; if .<ADT<AP02SDT then ADT=AP02SDT; end;
+    else do; STARTDT=RANDDT; if .<ADT<RANDDT then ADT=RANDDT; end;
+	if .<AP02SDT<=ADT then APERIOD=2;
+	else APERIOD=1;
+	if nmiss(ADT,STARTDT)=0 then do;
+        if .<ADT<STARTDT then AVAL=1;
+        else AVAL=ADT-STARTDT+1;
+	end;
+run;
+
+data &DSETNAME.;
+    set _adtte_all;
+	PARCAT1 = 'DERIVED PER ADJUDICATION';
+	adtm=.;
+run;
+
+
+**Generate final dataset by updating certain attributes. Optionally merge common variables & create sequence variable as needed**;
+%trta(dsname=&DSETNAME);
+
+
+%adam_dataset_update(
+	ds=&DSETNAME,
+	libin=work,
+	libout=output,
+	adsllib=adb,
+	addcomvar=Y,
+	addseq=,
+	dropinfmt=Y,
+	mapspecfile=&ADAM_SPEC,
+	maploc=&ADAM_SPEC_LOC,
+	debug=N
+	);
+	
+**Generate Value Level Metadata values for the ad<xx> dataset**;
+%* dod_vlm(        
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&ADAM_SPEC_LOC,
+	specname=&ADAM_SPEC,
+	debug=N
+	);
+
+**Generate Enhanced Controlled Terminology for the ad<xx> dataset**;
+%* dod_enhcd_ct(            
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&ADAM_SPEC_LOC,
+	specname=&ADAM_SPEC,
+	map_ct_nm=,
+	map_ct_loc=,
+	debug=N
+	);

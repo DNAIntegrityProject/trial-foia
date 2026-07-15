@@ -1,0 +1,224 @@
+*************************************************************************************************;
+* 
+*           CLIENT:  ModernaTX, Inc.
+*         PROTOCOL:  mRNA-1273-P301
+*
+*          PURPOSE: Create analysis dataset adeff3
+*      
+*      INPUT FILES: SDTM domains
+*     OUTPUT FILES: adeff3.sas7bdat
+*
+*      USAGE NOTES: 
+*      
+*************************************************************************************************;
+*  Copyright 2021 Pharmaceutical Product Development, Inc.
+*  All Rights Reserved. 
+*************************************************************************************************;
+/* Keys: USUBJID, PARAMCD, ARELTPT */
+proc sql;
+   create table adsl as select * from adb.adsl;
+   create table adeff as select * from adb.adeff;
+   create table vs as select * from trans.vs
+      where VSSCAT="COVID-19" and VSTESTCD in ("OXYSAT","TEMP") and VSSTAT ne "NOT DONE";
+   create table faef as select * from trans.faef
+      where FACAT="EFFICACY" and FASCAT="COVID-19" and FASTAT ne "NOT DONE";
+   create table ho as select * from trans.ho;
+   create table pts as select distinct USUBJID from adb.adeff
+      where AVALC="Y" and PARAMCD="COVIDA" and APERIOD = 1 and . < ADT <= EFFCODT;
+quit;
+
+/* Derive COVIDADT */
+data adeff2;
+   set adeff;
+   if PARAMCD="COVIDA" and APERIOD = 1 and . < ADT <= EFFCODT;
+run;
+data adeff03;
+   set adeff2;
+   by USUBJID ADY;
+   if first.USUBJID;
+   COVIDADT=ADT;
+   format COVIDADT date9.;
+   keep USUBJID COVIDADT;
+run;
+data adeff4;
+   merge adeff adeff03;
+   by USUBJID;
+run;
+
+/* Derive ADT--ARELTG2N, PARAM, PARAMCD */
+data vsfaef;
+length PARAM $200 PARAMCD $8;;
+   set vs(in=invs) faef(in=infaef);
+   if invs then do;
+      SRCDOM=DOMAIN;
+	  SRCSEQ=VSSEQ;
+	  SRCVAR="VSSTRESN";
+      ADT=input(VSDTC,e8601da.);
+	  PARAM=strip(VSTEST)||" ("||strip(VSSTRESU)||")";
+	  PARAMCD=VSTESTCD;
+   end;
+   if infaef then do;
+      SRCDOM=DOMAIN;
+	  SRCSEQ=FASEQ;
+	  SRCVAR="FASTRESC";
+      if FADTC ne "" then ADT=input(FADTC,e8601da.);
+	  PARAM=FAOBJ;
+	  if FAOBJ="Myalgia" then PARAM="Muscle Aches (Myalgia)";
+	  if FAOBJ="Rhinorrhea" then PARAM="Runny Nose (Rhinorrhea)";
+	  if PARAM="Chills" then PARAMCD="CHILLS";
+	  if PARAM="Cough" then PARAMCD="COUGH";
+	  if PARAM="Shortness of Breath" then PARAMCD="SHBREATH";
+	  if PARAM="Difficulty Breathing" then PARAMCD="DIBREATH";
+	  if PARAM="Fatigue" then PARAMCD="FATIGUE";
+	  if PARAM="Muscle Aches (Myalgia)" then PARAMCD="MYALGIA";
+	  if PARAM="Body Aches" then PARAMCD="BODYACHE";
+	  if PARAM="Headache" then PARAMCD="HEADACHE";
+	  if PARAM="New Loss of Taste" then PARAMCD="NLTASTE";
+	  if PARAM="New Loss of Smell" then PARAMCD="NLSMELL";
+	  if PARAM="Nasal Congestion" then PARAMCD="NASALCON";
+	  if PARAM="Runny Nose (Rhinorrhea)" then PARAMCD="RUNNOSE";
+	  if PARAM="Nausea" then PARAMCD="NAUSEA";
+	  if PARAM="Vomiting" then PARAMCD="VOMIT";
+	  if PARAM="Diarrhea" then PARAMCD="DIARRHEA";
+	  if PARAM="Sore Throat" then PARAMCD="STHROAT";
+   end;
+   format ADT e8601da.;
+   keep STUDYID SRCDOM SRCSEQ SRCVAR USUBJID PARAM PARAMCD ADT FASTRESC VSSTRESN;
+run;
+proc sort data=vsfaef;by USUBJID;run;
+data vsfaef2;
+length ARELTPG1 ARELTPG2 $100 PARCAT1 AVALC $50;
+   merge vsfaef adeff03;
+   by USUBJID;
+   ARELTPTN=ADT-COVIDADT+1;
+   if ARELTPTN ge 1;
+   ARELTPT="Day "||strip(put(ARELTPTN,best.));
+   if 1 le ARELTPTN le 15 then do;
+      ARELTPG1="<= 14 Days after COVID-19 Onset Date";
+	  ARELTG1N=1;
+   end;
+   if ARELTPTN > 15 then do;
+      ARELTPG1="> 14 Days after COVID-19 Onset Date";
+	  ARELTG1N=2;
+   end;
+   if 0 le ARELTPTN le 29 then do;
+      ARELTPG2="<= 28 Days after COVID-19 Onset Date";
+	  ARELTG2N=1;
+   end;
+   if ARELTPTN > 29 then do;
+      ARELTPG2="> 28 Days after COVID-19 Onset Date";
+	  ARELTG2N=2;
+   end;
+   if PARAMCD in ("OXYSAT","TEMP") then do;
+      PARCAT1="Oxygen Saturation or Temperature";
+	  PARCAT1N=2;
+	  AVALC="";
+	  AVAL=VSSTRESN;
+   end;
+   if PARAMCD not in ("OXYSAT","TEMP") then do;
+      PARCAT1="Non Oxygen Saturation and Temperature";
+	  PARCAT1N=1;
+	  AVALC=FASTRESC;
+	  if AVALC="NONE" then AVAL=0;
+	  if AVALC="MILD" then AVAL=1;
+	  if AVALC="MODERATE" then AVAL=2;
+	  if AVALC="SEVERE" then AVAL=3;
+   end;
+run;
+
+data ho2;
+   merge trans.ho adeff03;
+   by USUBJID;
+   if HOSTDTC ne "" then do;
+      if HOOCCUR="Y" and . < COVIDADT le input(scan(HOSTDTC,1,"T"),e8601da.) 
+         and strip(HOTERM) in ("HOSPITAL","ADMITTED TO ICU") then HOSPFL="Y";
+   end;
+   keep USUBJID HOSPFL;
+run;
+proc sort data=ho2;by USUBJID HOSPFL;run;
+data ho3;
+   set ho2;
+   by USUBJID HOSPFL;
+   if last.USUBJID;
+run;
+data vsfaef3;
+   merge vsfaef2 ho3;
+   by USUBJID;
+run;
+
+/* AGAPFL and FASYMPFL */
+proc sql;
+   create table agapfl as
+   select distinct USUBJID,ADT
+   from vsfaef3
+   order by USUBJID,ADT;
+quit;
+data agapfl2;
+retain AGAPFL;
+   set agapfl;
+   by USUBJID ADT;
+   LAGADT=lag(ADT);
+   if first.USUBJID then LAGADT=.;
+   if ADT-LAGADT > 28 then AGAPFL0="Y";
+   if AGAPFL0="Y" then AGAPFL="Y";
+   if first.USUBJID then AGAPFL="";
+   format LAGADT e8601da.;
+run;
+data agapfl3;
+   set agapfl2;
+   if AGAPFL="Y";
+   keep USUBJID ADT AGAPFL;
+run;
+proc sort data=vsfaef3;by USUBJID ADT;run;
+data vsfaef4;
+   merge vsfaef3 agapfl3;
+   by USUBJID ADT;
+   if HOSPFL ne "Y" and ARELTG2N = 1 and AGAPFL ^= 'Y' then ANL01FL="Y";
+run;
+
+data fasympfl;
+   set vsfaef4;
+   if PARAMCD not in ("TEMP","OXYSAT") and AVAL > 0;
+   keep USUBJID ADT;
+run;
+data fasympfl2;
+   set fasympfl;
+   by USUBJID ADT;
+   if first.USUBJID;
+run;
+data vsfaef5;
+   merge vsfaef4 fasympfl2(in=in2);
+   by USUBJID ADT;
+   if in2 and PARAMCD not in ("TEMP","OXYSAT") and AVAL > 0 then FASYMPFL="Y";
+run;
+
+/* Subset patients */
+data adsl2;
+   set adsl;
+   keep USUBJID;
+run;
+data pts2;
+   merge pts(in=inpts) adsl2(in=inadsl);
+   by USUBJID;
+   if inpts and inadsl;
+run;
+data adeff3;
+   merge vsfaef5 pts2(in=inpts);
+   by USUBJID;
+   if inpts;
+   if PARAMCD="" then delete;
+   drop VSSTRESN FASTRESC;
+run;
+
+%adam_dataset_update(
+	ds=adeff3,
+	libin=work,
+	libout=output,
+	adsllib=adb,
+	addcomvar=Y,
+	addseq=,
+	dropinfmt=Y,
+	mapspecfile=&ADAM_SPEC,
+	maploc=&ADAM_SPEC_LOC,
+	debug=N
+	);

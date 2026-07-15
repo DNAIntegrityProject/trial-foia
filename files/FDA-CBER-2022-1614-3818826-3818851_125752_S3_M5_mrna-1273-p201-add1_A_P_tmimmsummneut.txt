@@ -1,0 +1,1094 @@
+************************************************************************
+*        CLIENT:  ModernaTX, Inc.
+*      PROTOCOL:  mRNA-1273-P201
+*       PURPOSE:  Create macro tmimmsummneut
+*
+*
+*   INPUT FILES:   
+*  OUTPUT FILES:   
+*   USAGE NOTES:  
+************************************************************************* 
+*  Copyright 2020 PPD
+*  All Rights Reserved. 
+*************************************************************************;
+
+*** Setup ***; 
+
+** Clear log, output, work library ;
+proc datasets mt = data lib = work kill nolist;
+run;
+dm 'log;clear;output;clear;';
+options noquotelenmax nonumber;
+
+options  mlogic mprint;
+*** Defaults ***;
+%include "modmrna1273p201_IA_defaults.sas";
+%include ".\mgm_ci.sas";
+%include ".\mclopper.sas";
+%include "mmwintext.sas";
+
+
+*** set as needed for interactive sessions or when default values of 
+*** g_deliverableid and get_tf_id are not the same as g_pgmname;
+ 
+
+** Setup Table Defaults;
+%let _default_debug = Y; 
+%let _default_help = Y; 
+	 %Header(Type = A);
+
+** Formats here **; 
+	 proc format; 
+		value $avisit (notsorted)
+		'Baseline' = 'Baseline' 
+		'Day 29' = 'Day 29'
+		'Day 43' = 'Day 43'
+		'Day 57' = 'Day 57'
+		'Day 209' = 'Day 209'
+		;
+	 run;
+        
+        * ==== Subgroup ;
+        * subgroup variable;
+        %let subgroup =;
+		%let subgrp_preloadfmt =;
+
+        * title used for the subgroup;
+        %let subgroup_title =;
+        
+        * symbol to use for alignment;
+        %let align_symbol = ; 
+
+%let _default_report_options = nowd missing spacing=1 split="&_default_prcode_split" ;
+%let _DEFAULT_PAGE_LENGTH_LINES = 58;  
+      
+		** column 1 header or label ;
+		%let _default_col1_width_pcnt = 20;
+		%if %sysfunc(findw(t140202010101|t140202010102|t140202010201|t140202010202|m34,&g_pgmname,|))=0 %then %do;
+		%let _default_col1_label = Timepoint&_default_escapechar.n  Data Category&_default_escapechar.n    Statistic;
+		%end;
+		%if %sysfunc(findw(t140202010101|t140202010102|t140202010201|t140202010202|m34,&g_pgmname,|)) %then %do;
+        %let _default_col1_label = Timepoint&_default_escapechar.n  Statistic;
+		%end;
+
+	* Manipulate datasets for counting *;
+	%process_indata(out_data=adis, in_data=adb.adis, trtvar = trt01pn, type=table);
+	data adis;
+		set adis;
+		where &where; 
+
+	run;
+	** For summ stats **;
+	data adis_;
+		set adis;
+		where index(paramcd,"L10")=0;
+
+		*format paramcd $param.;
+	run;
+	
+	proc sql noprint; 
+	***Subgroup Title***;
+		create table Subgroup as select distinct  
+		param,
+		paramcd
+		from adis_
+		where index(upcase(param), 'LOG10') =0 ; 
+	quit; 
+
+	data Subgroup;
+	length subtitle $100.;
+		set Subgroup;
+
+		subtitle = 'Antibody: '||strip(param);
+		N= _n_;  
+		
+		if paramcd="MNET" then _section_ = '1';
+		if paramcd="MN50" then _section_ = '2';
+		if paramcd="PSVNT50" then _section_ = '3';  
+
+	run; 
+	proc sort; by _section_; run;
+	
+	*paramcd;
+	%mu_create_format
+	 (  in_data     = Subgroup
+	  , short_var   = paramcd
+	  , long_var    = subtitle
+	  , format_name = $param_
+	  );
+
+	** For CI **;
+	%gmt_gmr_ci(datain=ADIS
+		, subset=&where. and substr(param,1,5) = 'LOG10'
+		, dataout=ADIS_CI);
+
+	%clopper (datain=ADIS
+		, subset=&where. and substr(param,1,5) ne 'LOG10'
+		, crit= CRIT4FL, dataout=adis_clop4);
+	%clopper (datain=ADIS
+		, subset=&where. and substr(param,1,5) ne 'LOG10'
+		, crit= CRIT1FL, dataout=adis_clop1);
+	%clopper (datain=ADIS
+		, subset=&where. and substr(param,1,5) ne 'LOG10'
+		, crit= CRIT2FL, dataout=adis_clop2);
+	%clopper (datain=ADIS
+		, subset=&where. and substr(param,1,5) ne 'LOG10'
+		, crit= CRIT3FL, dataout=adis_clop3);
+
+** Macro for adding transformations in the CI datasets **;
+	%macro transform;
+		if cohort='Overall' and trt='Placebo' then TRTVARN = 1;
+		if cohort='Overall' and trt='mRNA-1273 50 ug' then TRTVARN = 2;
+		if cohort='Overall' and trt='mRNA-1273 100 ug' then TRTVARN = 3;
+		if cohort='Overall' and trt='mRNA-1273 Total' then TRTVARN = 77;
+		if cohort='Overall' and trt='Overall' then TRTVARN = 70;
+
+
+		if cohort='>=18 and <55 Years' and trt='Placebo' then TRTVARN = 4;
+		if cohort='>=18 and <55 Years' and trt='mRNA-1273 50 ug' then TRTVARN = 5;
+		if cohort='>=18 and <55 Years' and trt='mRNA-1273 100 ug' then TRTVARN = 6;
+		if cohort='>=18 and <55 Years' and trt='mRNA-1273 Total' then TRTVARN = 88;
+		if cohort='>=18 and <55 Years' and trt='Overall' then TRTVARN = 80;
+
+		if cohort='>=55 Years' and trt='Placebo' then TRTVARN = 7;
+		if cohort='>=55 Years' and trt='mRNA-1273 50 ug' then TRTVARN = 8;
+		if cohort='>=55 Years' and trt='mRNA-1273 100 ug' then TRTVARN = 9;
+		if cohort='>=55 Years' and trt='mRNA-1273 Total' then TRTVARN = 99;
+		if cohort='>=55 Years' and trt='Overall' then TRTVARN = 90;
+	%mend;
+
+** Apply the format so the pageby_title appears formatted;
+	proc datasets nolist;
+	  modify adis_;
+	    format paramcd $param_.;
+	  run;
+	quit;
+	proc datasets nolist;
+	  modify adis_;
+	    format avisit $avisit.;
+	  run;
+	quit;
+
+********* !!!!!!!!!!!!!!! MODIFY BELOW WITH CAUTION !!!!!!!!!!!!!!  ***************;
+***Big N ***; 
+        %ma_bign(
+         in_data                 = &_default_bign_in_data.
+        ,in_where                = &bign_where
+        ,trigger_bign_in_colhead = YES
+		,TRIGGER_DUMMY_FOR_ZERO  = YES
+		, below_bign			 = 
+		, trigger_split_bign = Y
+
+        ) *;
+
+	** For summary statistics **;
+	%ma_summ_stats
+	 (  in_data   = adis_
+	  , trtvar    = &_default_trtvar.
+	  , vars      = aval
+	  , byvars    = paramcd avisit
+	  , byvars_preloadfmt = $param_ $avisit
+	  , BYVARS_SORT_ORDER =  N N
+	  , BYVARS_SORT_ASC_OR_DESC =  A A
+	  , subgroup  = 
+	  , out_data  = SUMM_STATS
+	  );
+
+	** Precision **;
+		** Precision **;
+		%ma_summ_stats_precision
+		 (  in_data = adis_
+		  , var     = aval
+		  , byvars =  paramcd
+		  , out_data = precision_data
+		  ) ;
+	
+		 data  precision_data;
+			 set precision_data;
+			 if precision >2 then precision = 2;
+		run;
+		
+		** Rules **;
+		%ma_summ_stats_rules
+		 (  in_data = summ_stats
+		  , byvars =  paramcd
+		  , out_data = SUMM_STATS_RULES
+	  ) ;
+	  
+	** Display **;
+		%ma_summ_stats_display
+	  ( in_data                = SUMM_STATS
+	  , rules_data             = SUMM_STATS_RULES 
+	  , rules_by               = paramcd 
+	  , precision_data         = PRECISION_DATA /* Data set from MA_SUMM_STATS_PRECISION */
+	  , precision_by           = paramcd 
+	  , precision_var	   = precision
+	  , bign_data              = bign 
+	  , in_where               = &where.
+	  , trtvar                 = &_default_trtvar.
+	  , trtvar_preloadfmt      = &_default_display_fmt.
+	  , subgroup               = 
+	  , stat_label_fmt         = $vstatf. /* the format created with the NOTSORTED option that will create both the label and order */ 
+	  , na_text                = NA /* The text which will be used when the stats are not estimable/not available... */
+	  , separator              = &_default_summ_stat_sep. /* the separator used in compound variables like MIN, MAX */
+	  , display                = V 
+	  , out_data               = SUMM_DISPLAY
+	  , supress_zero_row       = N 
+	  , help                   = &_default_help
+	  , debug                  = &_default_debug  );
+
+	
+	data summ_display;
+		set summ_display(drop=_section_);
+
+		if stat_row = 1 then do;
+			if index(avisit,"Baseline") then stat_label = "n[1]";
+			else stat_label = "n[3]";
+		end;
+		if stat_row = 2 then delete; /*delete mean, not needed in this table*/
+		if stat_row > 2 then stat_row = stat_row + 1;
+
+		if stat_value_99 in ('' '0') then delete;
+
+		if avisit = "Baseline" then byvar2_order = 1; 
+		else if avisit = "Day 29" then byvar2_order = 2;
+		else if avisit = "Day 43" then byvar2_order = 3;
+		else if avisit = "Day 57" then byvar2_order = 4;
+		else if avisit = "Day 209" then byvar2_order = 5;
+
+		_skipvar_ = byvar2_order; 
+
+		rename byvar1_order=_section_ byvar2_order=_order1_;
+
+		proc sort; by _section_ paramcd avisit _order1_ stat_row;
+	run;
+	
+	data Adis_ci;
+		set adis_ci;
+		
+		if paramcd = 'L10MNET' then PARAMCD = 'MNET';
+
+	run; 
+	
+	
+	  ** Manipulate ADIS_CI **;
+	proc sql noprint;
+			create table adis_ci0 as select distinct	
+				a.*,
+				b.precision 
+				from adis_ci a 
+				left join 
+				precision_data  b
+				on a.paramcd = b.paramcd;
+			quit;
+			
+			
+	%macro prec(var=, prec=);	 
+	length &var._ $50.;
+		if  &prec. = 0 then prec = 0.1;
+		if  &prec. = 1 then prec = 0.01;	
+		if  &prec. => 2 then prec = 0.001; 
+		
+			
+	if ~missing(&var.) then do;
+			&var.0=round(&var.,prec);
+			&var._ = strip(put(&var.0, 20.8));
+			if index(&var._,'.')= 0 then &var._ = strip(&var._)||'.000000000000';
+			else do;
+				&var._ = strip(put(&var.0, 20.8))||'0000000000';
+			end; 
+			if strip(&var._)  ne '' then &var._ = substr(&var._ , 1, index(&var._ , '.' ) + &prec + 1);
+	end; 
+	%mend;  
+	
+		  data adis_ci1 (drop=gmt gmr lowergmt uppergmt lowergmr uppergmr 
+			rename=(gmt_=gmt gmr_=gmr lowergmt_=lowergmt uppergmt_=uppergmt 
+					lowergmr_=lowergmr uppergmr_=uppergmr));
+			length   gmt_ci  gmr_ci $100.;
+		  	set adis_ci0; 
+		  	
+			if ~missing(gmt) then do;
+				%prec(var=gmt, prec=precision);	
+			end;
+			if ~missing(lowergmt) then do;
+				%prec(var=lowergmt, prec=precision);	
+			end;
+			if ~missing(uppergmt) then do;			
+				%prec(var=uppergmt, prec=precision);  
+			end;
+			gmt_ci = strip(lowergmt_)||", "||strip(uppergmt_);
+			if missing(lowergmt_) or missing (uppergmt_) then gmt_ci = 'NE, NE';
+			
+			if ~missing(gmr) then do;
+				%prec(var=gmr, prec=1); 
+			end;
+			if ~missing(lowergmr) then do;
+				%prec(var=lowergmr, prec=1) ;
+			end;
+			if ~missing(uppergmr) then do;			
+				%prec(var=uppergmr, prec=1) 
+			end;
+			gmr_ci = strip(lowergmr_)||", "||strip(uppergmr_);
+			if missing(lowergmr_) or missing (uppergmr_) then gmr_ci = 'NE, NE';
+		run; 
+proc sort data=adis_ci1; 	by trt cohort param paramcd avisit; run;
+	proc transpose data=adis_ci1 out=ci_transpose1;
+	  	by trt cohort param paramcd avisit;
+		var gmt gmt_ci	%if %sysfunc(findw(t140202010101|t140202010102|t140202010201|t140202010202|m34,&g_pgmname,|))=0 %then %do;
+ gmr gmr_ci %end;;
+	run;
+
+	data ci_transpose1;
+		set ci_transpose1(rename=(_NAME_=_stat_));
+
+		if avisit='Baseline' and index(_stat_,"gmr") then delete;
+		%transform;
+	run;
+
+	proc sort data=ci_transpose1; by param paramcd avisit _stat_; run;
+	proc transpose data=ci_transpose1 out=ci_transpose2 prefix=STAT_VALUE_;
+	  	by param paramcd avisit _stat_;
+		var col1;
+		id trtvarn;
+	run;
+	** Finalize CI dataset **;
+	data ci_transpose;
+		length stat_label $70;
+		set ci_transpose2(drop=_NAME_);
+
+		if upcase(_stat_) = "GMT" then do;
+			stat_label = "GMT";
+			stat_row = 2;
+		end;
+		else if upcase(_stat_) = "GMT_CI" then do;
+			stat_label = "95% CI [2]";
+			stat_row = 3;
+		end;
+
+		if upcase(_stat_) = "GMR" then do;
+			stat_label = "GMFR";
+			stat_row = 6;
+		end;
+		else if upcase(_stat_) = "GMR_CI" then do;
+			stat_label = "95% CI [2]";
+			stat_row = 7;
+		end;
+
+		fmtd_avisit = put(avisit,$avisit.);
+
+		if paramcd="MNET" then _section_ = 1;
+		if paramcd="MN50" then _section_ = 2;
+		if paramcd="PSVNT50" then _section_ =3; 
+
+		if avisit = "Baseline" then _order1_ = 1; 
+		else if avisit = "Day 29" then _order1_ = 2;
+		else if avisit = "Day 43" then _order1_ = 3;
+		else if avisit = "Day 57" then _order1_ = 4;
+		else if avisit = "Day 209" then _order1_ = 5;
+
+		_skipvar_ = _order1_; 
+
+		format avisit $avisit. paramcd $param_.;
+		drop param _stat_;
+		proc sort; by _section_ paramcd _order1_ avisit stat_row _SKIPVAR_;
+	run;
+		 
+ *** One Row Macro ***;
+	
+	%macro count_row(in_data=adis_, out_data=, paramcd=, inwhere=, intext=, sec=, ord=, ind=, inheader=, hind=2);
+        %ma_count_one_row(
+         in_data          = &in_data.
+        ,in_where         = &inwhere.
+		,subgroup	  	  = &subgroup.
+        ,text_for_column1 = &intext.
+        ,indent_column1   = &ind.
+        ,_section_        = &sec.
+        ,_order1_         = &ord.
+		,header		  	  = 
+        ,HEADER_INDENT	  =  
+        ,out_data         = &out_data. 
+		,byvars           = avisit
+		,byvars_preloadfmt = $avisit
+/*		,display_zero_row = no*/
+	) *;
+	
+	data &out_data.;
+		length paramcd $8;
+		set &out_data. ;
+
+		paramcd = &paramcd.; 
+		_skipvar_ = &ord.; 
+		AVISIT = FMTD_AVISIT;
+	run;	
+	
+	data &out_data._header; 
+		length col1 $100.;
+		set &out_data.(where=(trtvarn="99" and N ne 0));
+		_indent_ = 2;
+		_order1_ = &ord - .5;
+		col1 = "&inheader.";
+
+		keep _section_ avisit paramcd _skipvar_ _order1_ col1 _indent_ &_default_trtvar;
+		
+	run;
+	proc sort nodupkey; by  _section_ avisit paramcd _order1_ col1 _indent_ &_default_trtvar; run; 
+
+	%mend;
+	 	%if %sysfunc(findw(t140202010101|t140202010102|t140202010201|t140202010202|m34,&g_pgmname,|))=0 %then %do;
+	/*Seroconversion*/
+	%count_row(out_data=count_sec11, paramcd="MN50", inwhere=paramcd="MN50" and CRIT4FL="Y"  , intext=%nrstr(n[5] (%%)) , inheader=%str(Seroconversion [4]),sec=1, ord=10, ind=4);	  
+	 /*>=2*/ 
+	%count_row(out_data=count_sec14, paramcd="MN50", inwhere=paramcd="MN50" and CRIT1FL="Y"   , intext=%nrstr(n[5] (%%)), inheader=%str(>=2-fold Increase from Baseline [7]), sec=1, ord=13, ind=4); 
+	/*>=3*/
+	%count_row(out_data=count_sec17, paramcd="MN50", inwhere=paramcd="MN50" and CRIT2FL="Y" , intext=%nrstr(n[5] (%%)), inheader=%str(>=3-fold Increase from Baseline [7]), sec=1, ord=16, ind=4); 
+	/*>=4*/
+	%count_row(out_data=count_sec110, paramcd="MN50", inwhere=paramcd="MN50" and CRIT3FL="Y"  , intext=%nrstr(n[5] (%%)), inheader=%str(>=4-fold Increase from Baseline [7]), sec=1, ord=19, ind=4); 
+
+	/*Seroconversion*/
+	%count_row(out_data=count_sec21, paramcd="PSVNT50", inwhere=paramcd="PSVNT50" and CRIT4FL="Y"   , intext=%nrstr(n[5] (%%)), inheader=%str(Seroconversion [4]), sec=2, ord=10, ind=4); 
+	/*>=2*/
+	%count_row(out_data=count_sec24, paramcd="PSVNT50", inwhere=paramcd="PSVNT50" and CRIT1FL="Y" , intext=%nrstr(n[5] (%%)), inheader=%str(>=2-fold Increase from Baseline [7]), sec=2, ord=13, ind=4); 
+	/*>=3*/
+	%count_row(out_data=count_sec27, paramcd="PSVNT50", inwhere=paramcd="PSVNT50" and CRIT2FL="Y", intext=%nrstr(n[5] (%%)), inheader=%str(>=3-fold Increase from Baseline [7]), sec=2, ord=16, ind=4); 
+	/*>=4*/
+	%count_row(out_data=count_sec210, paramcd="PSVNT50", inwhere=paramcd="PSVNT50" and CRIT3FL="Y" , intext=%nrstr(n[5] (%%)), inheader=%str(>=4-fold Increase from Baseline [7]), sec=2, ord=19, ind=4); 
+
+
+	/*Seroconversion*/
+	%count_row(out_data=count_sec31, paramcd="MNET", inwhere=paramcd="MNET" and CRIT4FL="Y" , intext=%nrstr(n[5] (%%)), inheader=%str(Seroconversion [4]), sec=3, ord=10, ind=4); 
+	
+	%count_row(out_data=count_sec34, paramcd="MNET", inwhere=paramcd="MNET" and CRIT1FL="Y"   , intext=%nrstr(n[5] (%%)), inheader=%str(>=2-fold Increase from Baseline [7]), sec=3, ord=13, ind=4); 
+	/*>=3*/
+	%count_row(out_data=count_sec37, paramcd="MNET", inwhere=paramcd="MNET" and CRIT2FL="Y"  , intext=%nrstr(n[5] (%%)), inheader=%str(>=3-fold Increase from Baseline [7]), sec=3, ord=16, ind=4); 
+	/*>=4*/
+	%count_row(out_data=count_sec310, paramcd="MNET", inwhere=paramcd="MNET" and CRIT3FL="Y"  , intext=%nrstr(n[5] (%%)), inheader=%str(>=4-fold Increase from Baseline [7]), sec=3, ord=19, ind=4); 
+
+	PROC SQL noprint;
+		select distinct memname into: count separated by ' '
+		from dictionary.columns 
+		where upcase(libname) = 'WORK' and index(upcase(memname), 'COUNT_')  > 0 ;
+	quit;
+	%put Alert_I: &count.;
+	
+	%mu_setall
+	        (in_data_list = &count.
+	        ,out_data     = setall_counts
+			,trigger_replace_out_data = Y
+	        ) *;
+
+	        data denom;
+	        	set SUMM_STATS;
+	        	if avisit ne 'Baseline';
+	        	denom = var1_n;
+	        	drop _section_;
+	        run;
+	                		
+	*** derive percentages;
+	        %ma_n_pcnt
+	        (in_data  = setall_counts
+	        ,subgroup = &subgroup
+	        ,out_data = N_PCNT
+	        ,IN_DENOM_DATA = denom
+	        ,IN_DENOM_MERGE_VARS = &_default_trtvar paramcd avisit
+	        ,IN_DENOM_VAR = denom
+	        ) *;
+	data n_pcnt;
+		set n_pcnt;
+
+		if denom = 0 then delete; /*no counts*/
+	run;
+	proc sort data = N_PCNT;
+		by &_default_trtvar.  paramcd avisit _section_ _skipvar_ _order1_ _indent_ col1;
+	run;
+	
+	*** Transpose treatments to columns ***;
+	        %mu_transpose(
+	         in_data        = n_pcnt
+	        ,transpose_by   = paramcd avisit _section_ _skipvar_ _order1_ _indent_ col1
+	        ,transpose_vars = n_pcnt 
+	        ,transpose_id   = &_default_trtvar
+	        ,out_data       = trans
+	        ) *;
+	
+			data trans;
+				set trans;
+	
+				rename 	N_PCNT_1=STAT_VALUE_1 N_PCNT_2=STAT_VALUE_2 N_PCNT_3=STAT_VALUE_3 N_PCNT_77=STAT_VALUE_77 N_PCNT_70=STAT_VALUE_70 
+						N_PCNT_4=STAT_VALUE_4 N_PCNT_5=STAT_VALUE_5 N_PCNT_6=STAT_VALUE_6 N_PCNT_88=STAT_VALUE_88 N_PCNT_80=STAT_VALUE_80 							
+						N_PCNT_7=STAT_VALUE_7 N_PCNT_8=STAT_VALUE_8 N_PCNT_9=STAT_VALUE_9 N_PCNT_99=STAT_VALUE_99 N_PCNT_90=STAT_VALUE_90
+						COL1=STAT_LABEL; 
+	 
+				
+				format paramcd $param_.;
+				inpnct = 'Y';
+				if strip(avisit) = 'Baseline' then delete;
+		run; 
+	
+	
+	** Manipulate ADIS_CLOP **;
+	%macro clopper_manip(indata=,outdata=,row1=, row2=, row3=, skip1=, skip2=, skip3=);
+	  data &indata.1(drop=lowercl uppercl  
+		rename=(lowercl_=lowercl uppercl_=uppercl));
+	  	set &indata.;
+
+		if ~missing(lowercl) then do;
+			%prec(var=lowercl, prec=0) ; 
+		end;
+		if ~missing(uppercl) then do;
+			%prec(var=uppercl, prec=0) ; 
+		end;
+		cl_ci = strip(lowercl_)||", "||strip(uppercl_);
+
+		if paramcd = "L10PVN50" then paramcd = "PSVNT50"; 
+		if paramcd = "L10MNET" then paramcd = "MNET";
+		IF paramcd = "L10MN50"  then paramcd = "MN50";
+	  run;
+
+
+	proc sort data=&indata.1; by trt cohort paramcd avisit; run;
+	proc transpose data=&indata.1 out=ci_transp1;
+	  	by trt cohort paramcd avisit;
+		var cl_ci;
+	run;
+	data ci_transp1;
+		set ci_transp1(rename=(_NAME_=_stat_));		
+		%transform;
+	run;
+
+	proc sort data=ci_transp1; by paramcd avisit _stat_; run;
+	proc transpose data=ci_transp1 out=ci_transp2 prefix=STAT_VALUE_;
+	  	by paramcd avisit _stat_;
+		var col1;
+		id trtvarn;
+	run;
+	** Finalize CI dataset **;
+	data &outdata.;
+		length stat_label $70;
+		set ci_transp2(drop=_NAME_);
+
+		if upcase(_stat_) = "CL_CI" then do;
+			stat_label = "95% CI [6]";
+			_indent_ = 2;
+		end;
+
+		stat_row = 99;
+
+		fmtd_avisit = put(avisit,$avisit.);
+
+		if paramcd="MNET" then _section_ = 1;
+		if paramcd="MN50" then _section_ = 2;
+		if paramcd="PSVNT50" then _section_ = 3;
+
+		if avisit = "Day 29" then do;
+			_order1_ = 2;
+			_skipvar_ = &row1.; 
+		end;
+		else if avisit = "Day 43" then do;
+			_order1_ = 3;
+			_skipvar_ = &row1.; 
+		end;
+		else if avisit = "Day 57" then do;
+			 _order1_ = 4;
+			_skipvar_ = &row1.; 
+		end;
+		else if avisit = "Day 209" then do;
+			 _order1_ = 5;
+			_skipvar_ = &row1.; 
+		end;
+		format avisit $avisit. paramcd $param_.;
+		drop _stat_;
+		proc sort; by _section_ paramcd _order1_ avisit stat_row;
+	run;
+	%mend;
+	%clopper_manip(indata=adis_clop4,outdata=clop4_trans, row1=10, row2=13, row3=14, skip1=3, skip2=4, skip3=5);
+	%clopper_manip(indata=adis_clop1,outdata=clop1_trans, row1=13, row2=15, row3=16, skip1=4, skip2=5, skip3=6);
+	%clopper_manip(indata=adis_clop2,outdata=clop2_trans, row1=16, row2=18, row3=19, skip1=5, skip2=6, skip3=7);
+	%clopper_manip(indata=adis_clop3,outdata=clop3_trans, row1=19, row2=21, row3=22, skip1=6, skip2=7, skip3=8);
+ %end;
+** Set all summaries **;
+	%mu_setall
+	 (  in_data_list = summ_display ci_transpose  
+	  , out_data = summ_all1	 
+	  , trigger_replace_out_data = Y	 
+	);
+
+	proc sort data=summ_all1; by _section_ paramcd _order1_ avisit stat_row; run;
+
+	** Add by records before every variable in byvars;
+	%mu_get_sort_order(summ_all1);
+	%mr_add_by_rec
+	(in_data                = summ_all1
+	,sortvars               = &sort_order 
+	,byvars                 = avisit
+	,byvarsfmt              = $avisit.
+	,ordervar               = STAT_ROW
+	,indentspace            = 2
+	,out_data               = DISPLAY
+	,colname                = STAT_LABEL
+	,help                   = &_default_help
+	,debug                  = &_default_debug
+	) *;
+** Set all summaries **;
+	%mu_setall
+	 (  in_data_list = display %if %sysfunc(findw(t140202010101|t140202010102|t140202010201|t140202010202|m34,&g_pgmname,|))=0 %then %do;
+ trans clop4_trans clop1_trans clop2_trans clop3_trans  %end;
+	  , out_data = summ_all	
+	  , trigger_replace_out_data = Y	 
+	);
+	 
+	data summ_all(drop=fmtd_:);
+		retain param;
+		set summ_all;
+		param=put(paramcd, $param_.);
+	run;
+	data display3(sortedby=&sort_order.); 
+	length n_STAT_VALUE_1 n_STAT_VALUE_2 n_STAT_VALUE_3 n_STAT_VALUE_4 n_STAT_VALUE_5  n_STAT_VALUE_6 n_STAT_VALUE_8 n_STAT_VALUE_7 n_STAT_VALUE_9 n_STAT_VALUE_77 n_STAT_VALUE_88 n_STAT_VALUE_99 $100;
+		set summ_all;	 
+		retain n_STAT_VALUE_1 n_STAT_VALUE_2 n_STAT_VALUE_3 n_STAT_VALUE_4 n_STAT_VALUE_5 
+		n_STAT_VALUE_6 n_STAT_VALUE_8 n_STAT_VALUE_7 n_STAT_VALUE_9 n_STAT_VALUE_77 n_STAT_VALUE_88 n_STAT_VALUE_99;
+		
+		if missing(_skipvar_) then _skipvar_ = _order1_;
+		if stat_label = "" then delete;	
+		if stat_row in (6 7) and avisit = 'Baseline' then delete;		
+		
+		array n_val {*} n_STAT_VALUE_1 n_STAT_VALUE_2 n_STAT_VALUE_3 n_STAT_VALUE_77 n_STAT_VALUE_4 n_STAT_VALUE_5 n_STAT_VALUE_6 n_STAT_VALUE_7 n_STAT_VALUE_8 n_STAT_VALUE_9  n_STAT_VALUE_88 n_STAT_VALUE_99;
+		array stat_val {*} STAT_VALUE_1 STAT_VALUE_2 STAT_VALUE_3 STAT_VALUE_77 STAT_VALUE_4 STAT_VALUE_5 STAT_VALUE_6 STAT_VALUE_7 STAT_VALUE_8 STAT_VALUE_9  STAT_VALUE_88 STAT_VALUE_99;
+		array len {*} length_1 length_2 length_3 length_77 length_4 length_5 length_6 length_7 length_8 length_9  length_88 length_99;
+	
+		do i = 1 to dim(n_val);				
+			if i in (1 2 3 4) then len{i} = 18;
+			else  len{i} = 11;
+
+			if length(strip(stat_val{i} )) > len{i} then stat_val{i}  = tranwrd(stat_val{i} , ",", ",&_default_escapechar.n")||' ';		
+		
+			if index(strip(stat_label),'n[' ) > 0 then do;  
+				n_val{i}  = strip(stat_val{i}); 
+				if index(n_val{i} ,'(')> 0 then n_val{i}  = strip(scan(n_val{i} ,1,'(')); 		
+			end;
+	
+			if index(strip(stat_label),'95%') > 0 then do; 
+				*if n_val{i}   in ( '0' )  then stat_val{i} = ''; 
+			end;
+		end;
+	run; 
+	proc sort data=display3; by _section_ param _order1_ avisit stat_row _skipvar_; run;
+	   
+	  
+	%mu_get_sort_order(display3);
+	
+	%if &G_OUTTYPE =INTEXT %then %do;  
+		%mw_post_process(indata =display3,column1=stat_label);
+	  %end;
+	proc sort data=display3; by _section_ param _order1_ avisit stat_row _skipvar_; run;
+	  
+
+	** PACKTEXT;
+	%mr_pack
+	(in_data                = DISPLAY3
+	,out_data               = PACKED
+	,var                    = stat_label  
+	,page_width_chars       = &_default_page_width_chars. 
+	%if &G_OUTTYPE =INTEXT %then %do;  
+	   , col1_width_pcnt   = 50
+	%end;
+	%if &G_OUTTYPE ne INTEXT %then %do;   
+	   , col1_width_pcnt  =  &_default_col1_width_pcnt 
+	 %end;
+	,indent                 = _indent_
+	,offset                 = 1
+	,prcode_split           = &_default_prcode_split.
+	,escapechar             = &_default_escapechar.
+	,help                   = &_default_help
+	,debug                  = &_default_debug
+	) *;
+	data packed;
+		set packed
+		(rename = (_section_ = _section_old _order1_ = _order1_old));
+	
+		if strip(avisit) = "Baseline" then _section_ = 1; 
+		if strip(avisit) = "Day 29"   then _section_ = 2;
+		if strip(avisit) = "Day 43"   then _section_ = 3;
+		if strip(avisit) = "Day 57"   then _section_ = 4;
+		if strip(avisit) = "Day 209"   then _section_ = 5;
+	
+		if paramcd="MNET"    then _order3_ = 1;
+		if paramcd="MN50"    then _order3_ = 2;
+		if paramcd="PSVNT50" then _order3_ = 3;
+		 
+		if compress(stat_label)="n[5]%" and stat_value_99 in ("" "0") then delete;
+		_order1_  = _skipvar_;
+		_order2_  = stat_row;  
+	run; 
+	proc sort nodupkey; by _order3_ _section_ _order1_ _order2_ STAT_VALUE_1 STAT_VALUE_2 STAT_VALUE_3 STAT_VALUE_77 STAT_VALUE_70 STAT_VALUE_4 STAT_VALUE_5 STAT_VALUE_6 STAT_VALUE_88 STAT_VALUE_80 STAT_VALUE_7 STAT_VALUE_8 STAT_VALUE_9 STAT_VALUE_99 STAT_VALUE_90;run; 
+	 
+** use title and footnote solution to set titles and footnotes;
+*** Open ODS ***; 
+  %get_tf
+            (metadata_filepath = &tf_extract.
+    	 ,tlf_progname      = &GET_TF_ID     
+  	 ,escapechar        = &_DEFAULT_ESCAPECHAR
+  	 ,use_parse_char    = YES
+  	 ,write_titles      = &_default_write_titles.
+  	 ,write_footnotes   = &_default_write_footnotes.
+  	 ,out_tf_dataset    = YES
+  	 ,globaltfs         = 1
+  	 ,Footnote_overline= &_default_Footnote_overline.
+           ,Footnote_hanging_indent = &_default_hanging_indent
+    	  %if &G_OUTTYPE ne INTEXT %then %do; 
+ 	     ,fpage			   = Yes
+ 	     ,fpage_first_footnote = %str(Notes are listed on last page.)
+ 	   %end;
+ 	  )*; 
+        
+        
+%if &G_OUTTYPE. ne %str(INTEXT) %then %do; 
+%mr_odsout *; 
+
+        ** this macro uses the dataset produced by get_tf
+        ** if using spanning headers and/or subgroup titles, enter the total
+        ** number of these extra lines into SPANNER_SUBGROUP_LINES;
+        %mu_lines_per_page
+        (tlf_progname           = &get_tf_id.
+        ,spanner_lines          =        
+        ,linesperpage           = %sysevalf(&_default_page_length_lines.-5)
+        ,in_data                = PACKED
+        ,escapechar             = &_default_escapechar.
+        ,prcode_split           = &_default_prcode_split.
+        ,rtfwidth               = &_default_page_width_chars.
+        ,debug                  = &_default_debug
+	,headerlines			= 3
+        );
+
+** APPLY PAGE BREAK;
+		proc sort data=packed; by _section_ param _order1_ avisit stat_row _skipvar_; run;
+        %mu_get_sort_order(packed);
+ 
+       data PAGEBREAK;
+       	set packed;
+       	pagenum = 1;
+       run;
+       
+        %mu_get_sort_order(PAGEBREAK) *;
+
+** decimal align the columns;
+		*Decimal align for overall group;
+		%mu_align
+		 ( in_data       = PAGEBREAK    
+		 , out_data		 = prefinal 
+		 , align         = C                 
+		 , left_spacing  = 1100
+		 , columns       = STAT_VALUE_1 STAT_VALUE_2 STAT_VALUE_3 STAT_VALUE_77 STAT_VALUE_70
+		 );
+
+		 *Center align for cohorts;
+		%mu_align
+		 ( in_data       = prefinal    
+		 , out_data		 = final 
+		 , align         = C                 
+		 , left_spacing  = 450
+		 , columns       = STAT_VALUE_4 STAT_VALUE_5 STAT_VALUE_6 STAT_VALUE_88 STAT_VALUE_80 STAT_VALUE_7 STAT_VALUE_8 STAT_VALUE_9 STAT_VALUE_99 STAT_VALUE_90
+		 );
+	
+*** Create unique combination of section and param ***;  
+*** Generate Report ***;
+%macro bygroup(indata=, section=, param=);
+
+data %sysfunc(compress(indata&section));
+	set &indata.;
+	if _order3_  = &section.;
+run;
+
+%let _default_report_options = nowd missing spacing=1 split="&_default_prcode_split" ;
+%table_report(type=A, in_data=%sysfunc(compress(indata&section)), column_1=pack_stat_label, col1_label=&_default_col1_label., _order1_=_order1_, _order2_=_order2_, _order3_=_order3_, colprefix = STAT_VALUE, Trig_disp=N);
+
+TITLE6 justify=left "&_default_escapechar.n&param."; 
+
+  data processed1;
+  	set processed1;  
+%if %sysfunc(findw(t140202010101|t140202010102|t140202010201|t140202010202|m34,&g_pgmname,|))=0 %then %do;
+ 	  if _section_ in ( 1) then pagenum = 1;
+ 	  if _section_ in ( 2) then pagenum = 2;
+ 	  if _section_ in ( 3) then pagenum = 3;
+ 	  if _section_ in ( 4) then pagenum = 4; 
+ 	  if _section_ in ( 5) then pagenum = 5;
+%end;
+	  %if %sysfunc(findw(t140202010101|t140202010102|t140202010201|t140202010202|m34,&g_pgmname,|)) %then %do;
+	  if _section_ in ( 1) then pagenum = 1;
+ 	  if _section_ in ( 2) then pagenum = 1;
+ 	  if _section_ in ( 3) then pagenum = 1;
+ 	  if _section_ in ( 4) then pagenum = 1; 
+ 	  if _section_ in ( 5) then pagenum = 2;
+	  %end;
+  run;
+   
+   data processed21;
+  	set processed2;  
+ 	  if _section_ in ( 1) ;
+ 	  pagenum = 1;
+  run;
+  
+  data processed20;
+  	set processed2;
+ 	  if _section_ not  in ( 1);
+	%if %sysfunc(findw(t140202010101|t140202010102|t140202010201|t140202010202|m34,&g_pgmname,|))=0 %then %do;
+
+ 	  if _section_ in ( 2) then do;
+			if _order1_ in ( 2) then pagenum = 2;
+			else pagenum = 3;
+	  end;
+ 	  if _section_ in ( 3) then do;
+		if _order1_ in ( 3) then pagenum = 4;
+		else pagenum = 5;
+	  end;
+
+ 	  if _section_ in ( 4) then do;
+			if _order1_ in ( 4) then pagenum = 6;
+			else pagenum = 7;
+	  end;
+ 	  if _section_ in ( 5) then do;
+			if _order1_ in ( 5) then pagenum = 8;
+			else pagenum = 9;
+	  end;
+	  %end;
+	  %if %sysfunc(findw(t140202010101|t140202010102|t140202010201|t140202010202|m34,&g_pgmname,|)) %then %do;
+ 	  if _section_ in ( 2) then pagenum = 0;
+ 	  if _section_ in ( 3) then pagenum = 0;
+ 	  if _section_ in ( 4) then pagenum = 1; 
+ 	  if _section_ in ( 5) then pagenum = 1;
+	  %end;
+
+	run; 
+  
+  %*mr_pagebreak_table
+	        (vartx	 = pack_stat_label STAT_VALUE_4 STAT_VALUE_5 STAT_VALUE_6 STAT_VALUE_88
+	                   STAT_VALUE_7 STAT_VALUE_8 STAT_VALUE_9 STAT_VALUE_99
+			,lines_left_on_page     = %sysevalf(&g_linesleft.-20) 
+	        ,in_data                = processed20
+	        ,out_data               = processed200
+	        ,escapechar             = &_default_escapechar.
+	        ,subgrp                 =     
+	        ,orderby                = _section_ _skipvar_ _order1_ _order2_
+	        ,section                = _skipvar_   
+	        ,lineskip               = 0
+	        ,section_protection     = Y
+	        ); 
+	        
+	data processed2;
+		set processed21 processed20(in=b);
+		if b then pagenum = pagenum+1;
+	run;
+	       	 
+  
+ 	%ml_report(in_data = processed1, 
+		   META_DATA = meta_data1,
+	           pagenum = pagenum,
+           debug = y,
+           NO_OBS_LINE= &_DEFAULT_NO_SUBJECTS_TABLE.) *; 
+
+	%ml_report(in_data = processed2, 
+	   META_DATA = meta_data2,
+           pagenum = pagenum,
+           debug = y,
+           NO_OBS_LINE= &_DEFAULT_NO_SUBJECTS_TABLE. 
+           ) *; 
+
+	proc datasets lib=work nolist;
+		delete meta_data1 meta_data2;
+	run;
+           
+%mend;
+
+        
+data _null_;
+	set subgroup;   
+	
+	call execute('%nrstr(
+		%bygroup(
+		indata=FINAL, 
+		section='||strip(_section_)||',
+		param='||strip(subtitle)||'	
+	    );
+    	)');
+run;
+	  %get_tf
+        (metadata_filepath = &tf_extract.
+	,tlf_progname      = &GET_TF_ID     
+        ,escapechar        = &_DEFAULT_ESCAPECHAR
+        ,use_parse_char    = YES
+        ,write_titles      = yes
+        ,write_footnotes   = yes
+        ,out_tf_dataset    = YES
+	,globaltfs         = 1
+	,fpage			   = Yes
+	,fpage_first_footnote = %str(Notes are listed on last page.)
+        )*;
+        
+
+*** Close ODS ***;
+%mr_odsclose *; 
+ 
+%end;
+
+%if &G_OUTTYPE. = %str(INTEXT) %then %do;  
+footnote;
+   		  
+		%let _default_col1_width_pcnt = 26;
+		%let colprefix = N_PCNT;
+			
+		
+		proc sql noprint;
+			select distinct name into: n_val separated by " " from dictionary.columns where libname = 'WORK' and memname= 'PACKED' 
+				 and index(upcase(name),'STAT_VALUE')>0; 
+				 
+			select distinct paramcd into: paramcd separated by " " 
+				from PACKED   ; 	
+				 
+		quit;
+		proc sort data = subgroup;
+			by paramcd;
+		run;
+		
+		proc sort data = PACKED out  = PACK;
+			by paramcd;
+		run; 
+		
+		data PACK;
+			merge PACK  subgroup (in=a keep = paramcd); 
+			by paramcd;
+			if a;
+			
+			pagenum = 1  	;		
+			array nstrip {*} &n_val.;		
+			do i = 1 to dim(nstrip); 
+				nstrip{i}  =strip(nstrip{i});  
+			end; 
+			
+			param =  compbl( tranwrd(param, "&_default_escapechar.n",'') );	
+			param =  compbl( tranwrd(param, "Nucleocapsid IgG Antibody",'nucleocapsid IgG antibody') );
+			param =  compbl( tranwrd(param, "IgG Antibody",'IgG antibody') );
+			param =  compbl( tranwrd(param, "Spike",'spike') ); 	
+			param =  compbl( tranwrd(param, "Antibody",'antibody') ); 
+			param =  compbl( tranwrd(param, "MN Endpoint Titer",'MN endpoint titer') ); 
+			param =  compbl( tranwrd(param, "antibody: ",'Antibody: ') );  	
+			
+		run;			
+
+		proc sort data =  PACK;
+			by _order3_ _section_ _order1_ _order2_  stat_row;
+		run; 
+		
+		 data &GET_TF_ID._TF_1;
+		 set &GET_TF_ID._TF;
+		 _tftext1= tranwrd(_tftext1, "escapechar", "_default_escapechar"); 
+		 _tftext1=tranwrd(strip(_tftext1),"'a0'x","||'a0'x");
+		 put _tftext1=;
+		 run;	
+		 
+		 proc sql noprint ;
+		   select _tftext1  into :footnotes separated by "|| '&_default_escapechar.n' ||" from &GET_TF_ID._TF_1 where _TorF eqt 'F' order by _seq ;
+		quit ; 
+		 
+		%mr_odsout
+		   ( escapechar    = &_default_escapechar
+		    , style	        = &_default_template_style
+		    , filecase	    = &_default_filecase
+		    , deliverableid = &g_deliverableid
+		    , options= &_default_ods_options.
+		    , idcompress    = 
+		 );  
+	
+	     
+		***OVERALL subgroup***;
+		proc report data=PACK missing split="$" nowd style(report)={outputwidth = 100%} ;
+			  COLUMNS  pagenum _order3_  param _section_ _skipvar_  _order1_ _order2_ pack_stat_label   
+		( "&_default_escapechar.R/RTF'\brdrb\brdrs\li100\ri100' Overall &_default_escapechar. "  STAT_VALUE_1  ( "&_default_escapechar.R/RTF'\brdrb\brdrs\li100\ri100' mRNA-1273 &_default_escapechar. " STAT_VALUE_2  STAT_VALUE_3 STAT_VALUE_77 )) ;  
+		   define PAGENUM / "PAGENUM" ORDER NOPRINT ORDER=INTERNAL ID style(header)={just=c vjust=m asis=on ProtectSpecialChars=off just=c } style(column)={just=l vjust=t asis=on ProtectSpecialChars=off ProtectSpecialChars=OFF asis = ON JUST=C cellwidth=0%} ;
+		  define _order3_ /ORDER NOPRINT ORDER=INTERNAL ID style(header)={just=c vjust=m asis=on  ProtectSpecialChars=off just=c } style(column)={just=l vjust=t asis=on ProtectSpecialChars=off ProtectSpecialChars=OFF asis = ON JUST=C cellwidth=0%} ;   
+	 	   define param / ORDER NOPRINT ORDER=INTERNAL ID style(header)={just=c vjust=m asis=on  ProtectSpecialChars=off just=c } style(column)={just=l vjust=t asis=on ProtectSpecialChars=off ProtectSpecialChars=OFF asis = ON JUST=C cellwidth=0%} ;
+		  		  
+		  compute before param / style=[just=L font_weight=bold];
+		  line param  $200.;
+		  endcomp; 
+		  define _section_/ ORDER NOPRINT ORDER=INTERNAL ID style(header)={just=c vjust=m asis=on  ProtectSpecialChars=off just=c } style(column)={just=l vjust=t asis=on ProtectSpecialChars=off ProtectSpecialChars=OFF asis = ON JUST=C cellwidth=0%} ;  	   
+		 
+	 	  define _skipvar_/ ORDER NOPRINT ORDER=INTERNAL ID style(header)={just=c vjust=m asis=on  ProtectSpecialChars=off just=c } style(column)={just=l vjust=t asis=on ProtectSpecialChars=off ProtectSpecialChars=OFF asis = ON JUST=C cellwidth=0%} ;
+		  compute after _skipvar_/ style={cellheight=1 ex};
+			line " ";
+		   endcomp;
+		   define _order1_/ ORDER NOPRINT ORDER=INTERNAL ID style(header)={just=c vjust=m asis=on  ProtectSpecialChars=off just=c } style(column)={just=l vjust=t asis=on ProtectSpecialChars=off ProtectSpecialChars=OFF asis = ON JUST=C cellwidth=0%} ;  	   
+		  
+		  define _order2_ / ORDER NOPRINT ORDER=INTERNAL ID style(header)={just=c vjust=m asis=on  ProtectSpecialChars=off just=c } style(column)={just=l vjust=t asis=on ProtectSpecialChars=off ProtectSpecialChars=OFF asis = ON JUST=C cellwidth=0%} ; 
+		  define pack_stat_label / "&_default_col1_label." style(column)=[cellwidth=12% asis=on] style(header)=[just=l asis=on]; 
+		  define STAT_VALUE_1 /  "&colhead_1"  style(column)=[cellwidth=10% asis=on vjust=b just=c protectspecialchars=off]; 
+		  define STAT_VALUE_2 /  "&colhead_2" style(column)=[cellwidth=10% asis=on vjust=b just=c protectspecialchars=off]; 
+		  define STAT_VALUE_3 /  "&colhead_3" style(column)=[cellwidth=10% asis=on vjust=b just=c protectspecialchars=off]; 
+		  define STAT_VALUE_77/  "&colhead_77" style(column)=[cellwidth=10% asis=on vjust=b just=c protectspecialchars=off]; 	 
+		  
+		 define pagenum / order order=internal noprint;
+		 compute before pagenum /style={cellheight=1ex};
+		 line " ";
+		 endcomp;
+		 break after pagenum / page;
+		 
+		run;
+		
+		 data _null_;
+				length g_footer $1000.;
+				g_footer=strip(symget('g_footer'));
+				call execute('footnote'||"%eval(&footnote_count+1)"||' j=L"'||strip(g_footer)||'";');
+		run;
+		
+		title;
+		
+		proc report data=PACK missing split="$" nowd style(report)={outputwidth = 100%} ; 
+			  COLUMNS  pagenum _order3_  param _section_ _skipvar_  _order1_ _order2_ pack_stat_label 
+			  
+			  ("Cohort 1 (Age >= 18 and age < 55) &_default_escapechar.R/RTF'\brdrb\brdrs\li100\ri100'"  STAT_VALUE_4 ( "&_default_escapechar.R/RTF'\brdrb\brdrs\li100\ri100' mRNA-1273 &_default_escapechar. "     STAT_VALUE_5 STAT_VALUE_6 STAT_VALUE_88)  )
+			  ("Cohort 2 (Age >= 55) &_default_escapechar.R/RTF'\brdrb\brdrs\li100\ri100'" STAT_VALUE_7 ( "&_default_escapechar.R/RTF'\brdrb\brdrs\li100\ri100' mRNA-1273 &_default_escapechar. "     STAT_VALUE_8 STAT_VALUE_9 STAT_VALUE_99) );
+			   define PAGENUM / "PAGENUM" ORDER NOPRINT ORDER=INTERNAL ID style(header)={just=c vjust=m asis=on ProtectSpecialChars=off just=c } style(column)={just=l vjust=t asis=on ProtectSpecialChars=off ProtectSpecialChars=OFF asis = ON JUST=C cellwidth=0%} ;
+			   define _order3_ /ORDER NOPRINT ORDER=INTERNAL ID style(header)={just=c vjust=m asis=on  ProtectSpecialChars=off just=c } style(column)={just=l vjust=t asis=on ProtectSpecialChars=off ProtectSpecialChars=OFF asis = ON JUST=C cellwidth=0%} ;   
+		 	   define param / ORDER NOPRINT ORDER=INTERNAL ID style(header)={just=c vjust=m asis=on  ProtectSpecialChars=off just=c } style(column)={just=l vjust=t asis=on ProtectSpecialChars=off ProtectSpecialChars=OFF asis = ON JUST=C cellwidth=0%} ;
+			  		  
+			  compute before param / style=[just=L font_weight=bold];
+			  line param  $200.;
+			  endcomp;  
+			  
+			  define _section_/ ORDER NOPRINT ORDER=INTERNAL ID style(header)={just=c vjust=m asis=on  ProtectSpecialChars=off just=c } style(column)={just=l vjust=t asis=on ProtectSpecialChars=off ProtectSpecialChars=OFF asis = ON JUST=C cellwidth=0%} ;  	   
+		 
+		 	  define _skipvar_/ ORDER NOPRINT ORDER=INTERNAL ID style(header)={just=c vjust=m asis=on  ProtectSpecialChars=off just=c } style(column)={just=l vjust=t asis=on ProtectSpecialChars=off ProtectSpecialChars=OFF asis = ON JUST=C cellwidth=0%} ;
+			  compute after _skipvar_/ style={cellheight=1 ex};
+				line " ";
+			   endcomp;
+			   define _order1_/ ORDER NOPRINT ORDER=INTERNAL ID style(header)={just=c vjust=m asis=on  ProtectSpecialChars=off just=c } style(column)={just=l vjust=t asis=on ProtectSpecialChars=off ProtectSpecialChars=OFF asis = ON JUST=C cellwidth=0%} ;  	   
+			  
+			  define _order2_ / ORDER NOPRINT ORDER=INTERNAL ID style(header)={just=c vjust=m asis=on  ProtectSpecialChars=off just=c } style(column)={just=l vjust=t asis=on ProtectSpecialChars=off ProtectSpecialChars=OFF asis = ON JUST=C cellwidth=0%} ; 
+			  define pack_stat_label / "&_default_col1_label." style(column)=[cellwidth=12% asis=on] style(header)=[just=l asis=on]; 
+			  define STAT_VALUE_4 /  "&colhead_4"  style(column)=[cellwidth=5% asis=on vjust=b just=c protectspecialchars=off]; 
+			  define STAT_VALUE_5 /  "&colhead_5" style(column)=[cellwidth=5% asis=on vjust=b just=c protectspecialchars=off]; 
+			  define STAT_VALUE_6 /  "&colhead_6" style(column)=[cellwidth=5% asis=on vjust=b just=c protectspecialchars=off]; 
+			  define STAT_VALUE_88/  "&colhead_88" style(column)=[cellwidth=5% asis=on vjust=b just=c protectspecialchars=off]; 	 
+			  define STAT_VALUE_7 /  "&colhead_7"  style(column)=[cellwidth=5% asis=on vjust=b just=c protectspecialchars=off]; 
+			  define STAT_VALUE_8 /  "&colhead_8" style(column)=[cellwidth=5% asis=on vjust=b just=c protectspecialchars=off]; 
+			  define STAT_VALUE_9 /  "&colhead_9" style(column)=[cellwidth=5% asis=on vjust=b just=c protectspecialchars=off]; 
+			  define STAT_VALUE_99/  "&colhead_99" style(column)=[cellwidth=5% asis=on vjust=b just=c protectspecialchars=off];
+			    
+			 define pagenum / order order=internal noprint;
+			 compute before pagenum /style={cellheight=1ex};
+			 line " ";
+			 endcomp;
+			 break after pagenum / page;
+		 
+		 compute after pagenum / style=[just=L asis=on];
+		 if (pagenum = 1) or ("" ne "") then do;
+	           length txt $5000.;
+	           txt=&footnotes.;
+	           line txt $5000.;
+		     end;
+		 endcomp;
+	run;
+		
+		
+		* close ODS;
+		%mr_odsclose *;  
+	
+%end; 

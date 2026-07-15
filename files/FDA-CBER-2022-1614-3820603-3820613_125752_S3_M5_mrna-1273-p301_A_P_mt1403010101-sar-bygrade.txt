@@ -1,0 +1,507 @@
+*************************************************************************************************;
+*           CLIENT: ModernaTX, Inc.
+*         PROTOCOL: mRNA-1273-P301
+*          PURPOSE: Create common code - Table Summary of Solicited Adverse Reactions by Grade      
+*      INPUT FILES: ADaM datasets
+*     OUTPUT FILES: FINAL.sas7bdat
+*      USAGE NOTES: 
+*************************************************************************************************;
+*  Copyright 2020 Pharmaceutical Product Development, Inc.
+*  All Rights Reserved.
+*************************************************************************************************;
+
+ 
+%colheader_type(total_display=NONE);
+
+%macro sar_bygrade;
+*** update_bign;
+%if %symexist(in_lib) ne 0 %then %do;
+%ma_bign
+	( in_data = bign_b
+	, in_where = &popfl.='Y' and covbln^=9 &bign_whr.
+	, subgroup = &cohortn.
+	);
+%end;
+%else %if %symexist(in_lib)=0 %then %do; 
+	%global in_lib; 
+	%let in_lib=adb; 
+	%put "Alert_C: library in_lib=&in_lib.";
+
+	%if %symexist(bign_whr) ne 0 %then %do;
+	%ma_bign
+		( in_data = adsl_b
+		, in_where = &popfl.='Y' and covbln^=9 &bign_whr.
+		, subgroup = &cohortn.
+		);
+	%end;
+%end;
+
+proc format;
+    value atoxgr (notsorted multilabel)
+	low - high = 'N1'
+	0 <- high = 'Any'
+	0 = 'Grade 0'
+	1 = 'Grade 1'
+	2 = 'Grade 2'
+	3 = 'Grade 3'
+	4 = 'Grade 4'
+	. = 'Missing'
+	;
+	value $param (notsorted)
+	'TOTAL'='Solicited Adverse Reactions'
+	'LOCAL'='Solicited Local Adverse Reactions'
+	'PAIN'='Pain'
+	'ERYTHDIA'='Erythema (Redness)'
+	'SWELLDIA'='Swelling (Hardness)'
+	'LYMPH'='Axillary Swelling or Tenderness'
+	'SYSTEMIC'='Solicited Systemic Adverse Reactions'
+	'FEVER'='Fever'
+	'HEADACHE'='Headache'
+	'FATIGUE'='Fatigue'
+	'MYALGIA'='Myalgia'
+	'ARTHRALG'='Arthralgia'
+	'NAUSEA'='Nausea/Vomiting'
+	'CHILLS'='Chills'
+	;
+quit;
+
+**In_dataset;
+data &in_data._b;
+    set &in_lib..&in_data.;
+	where &where. %if &in_data ne ADAR %then %do; and ANL06FL='Y' %end; 
+	%if %symexist(bign_whr) ne 0 %then %do; &bign_whr. %end;;
+run;
+
+data &in_data.0;
+    set &in_data._b;
+	output;
+	if PARCAT1='LOCAL' then do;
+	    PARAMCD='LOCAL'; output;
+	end;
+	if PARCAT1='SYSTEMIC' then do;
+	    PARAMCD='SYSTEMIC'; output;
+	end;
+	if PARCAT1 in ('LOCAL','SYSTEMIC') then do;
+	    PARAMCD='TOTAL'; output;
+	end;
+run;
+
+proc sort data=&in_data.0 tagsort; by %if &in_lib.=work %then %do; &cohortn. %end; USUBJID SUBJID PARAMCD ATOXGRN; run;
+
+data &in_data.1;
+    set &in_data.0;
+	by %if &in_lib.=work %then %do; &cohortn. %end; USUBJID SUBJID PARAMCD ATOXGRN;
+	if last.PARAMCD;
+run;
+
+data subset;
+    set &in_data.1;
+	%process_covbln(spanYN=,spaner=&subgroup.);
+	format paramcd $param.;
+run;
+
+%if &subtitfl.=N %then %do;
+%ma_count_categorical
+	 (  in_data = subset
+	  , byvars = PARAMCD 
+	  , byvars_preloadfmt = $param. 
+	  , byvars_sort_order = N 
+	  , byvars_sort_asc_or_desc = A 
+	  , catvar = ATOXGRN
+	  , catvar_preloadfmt = atoxgr.
+	  , catvar_sort_order = N
+	  , _section_ = 1
+	  , _order1_start = 1
+	  , get_subj_count = Yes
+	  , count_subj_var = N 
+	  , out_data = _count
+	 );
+%end; %else %if &subtitfl.=Y %then %do;
+%ma_count_categorical
+	 (  in_data = subset
+	  , byvars = PARAMCD &cohortn.
+	  , byvars_preloadfmt = $param. &subgroup_fmt.
+	  , byvars_sort_order = N N
+	  , byvars_sort_asc_or_desc = A A
+	  , catvar = ATOXGRN
+	  , catvar_preloadfmt = atoxgr.
+	  , catvar_sort_order = N
+	  , _section_ = 1
+	  , _order1_start = 1
+	  , get_subj_count = Yes
+	  , count_subj_var = N 
+	  , out_data = _count
+	 );
+%end;
+
+
+	/*** Grade 3 or Above ***/
+	proc sql;
+		create table _count34 as
+		select *,sum(n) as sumn from _count where col1 in ('Grade 3' 'Grade 4')
+		group by &_default_trtvar.,PARAMCD
+		%if &cohortn.^= %then %do;
+		,&cohortn.
+		%end;;
+	quit;
+
+	data _count34;
+		set _count34;
+		n=sumn;
+		if col1='Grade 3' then delete;
+		else if col1='Grade 4' then col1 = 'Grade 3 or Above';
+		
+		_order1_ = _order1_ + 0.5;
+		drop sumn;
+	run;
+
+	data _count;
+		set _count _count34;
+	run;
+	/************************/
+
+%macro non_adar;
+%if &in_data. ne ADAR %then %do;
+	**In_dataset;
+	data adar_b;
+	    set &in_lib..adar; /* adb.adar */
+		%if %symexist(bign_whr) ne 0 %then %do;
+		where &where. &bign_whr.;
+		%end; %else %do;
+		where &where.;
+		%end;
+	run;
+
+	data adar0;
+	    set adar_b;
+		output;
+		if PARCAT1='LOCAL' then do;
+		    PARAMCD='LOCAL'; output;
+		end;
+		if PARCAT1='SYSTEMIC' then do;
+		    PARAMCD='SYSTEMIC'; output;
+		end;
+		if PARCAT1 in ('LOCAL','SYSTEMIC') then do;
+		    PARAMCD='TOTAL'; output;
+		end;
+	run;
+
+	proc sort data=adar0 tagsort; 
+		by %if &subgroup.=agegn4 or &subgroup.=agegn4_title or 
+				&subgroup.=rskf or &subgroup.=rskf_title or 
+				&subgroup.=riskfn or &subgroup.=riskfn_title %then %do; &cohortn. %end; 
+			USUBJID SUBJID PARAMCD ATOXGRN; 
+	run;
+
+	data adar1;
+	    set adar0;
+		by %if &subgroup.=agegn4 or &subgroup.=agegn4_title or 
+				&subgroup.=rskf or &subgroup.=rskf_title or 
+				&subgroup.=riskfn or &subgroup.=riskfn_title %then %do; &cohortn. %end; 
+			USUBJID SUBJID PARAMCD ATOXGRN; 
+		if last.PARAMCD;
+	run;
+
+	data subset_adar;
+	    set adar1;
+		%process_covbln(spanYN=,spaner=&subgroup.);
+		format paramcd $param.;
+	run;
+
+	%if &subtitfl.^=Y %then %do;
+	%ma_count_categorical
+		 (  in_data = subset_adar
+		  , byvars = PARAMCD 
+		  , byvars_preloadfmt = $param. 
+		  , byvars_sort_order = N 
+		  , byvars_sort_asc_or_desc = A 
+		  , catvar = ATOXGRN
+		  , catvar_preloadfmt = atoxgr.
+		  , catvar_sort_order = N
+		  , _section_ = 1
+		  , _order1_start = 1
+		  , get_subj_count = Yes
+		  , count_subj_var = N 
+		  , out_data = _count_N1
+		 );
+	%end; %else %if &subtitfl.=Y %then %do;
+	%ma_count_categorical
+		 (  in_data = subset_adar
+		  , byvars = PARAMCD &cohortn.
+		  , byvars_preloadfmt = $param. &subgroup_fmt.
+		  , byvars_sort_order = N N
+		  , byvars_sort_asc_or_desc = A A
+		  , catvar = ATOXGRN
+		  , catvar_preloadfmt = atoxgr.
+		  , catvar_sort_order = N
+		  , _section_ = 1
+		  , _order1_start = 1
+		  , get_subj_count = Yes
+		  , count_subj_var = N 
+		  , out_data = _count_N1
+		 );
+	%end;
+
+	data _count;
+		set _count_N1(where=(COL1='N1')) 
+			_count(where=(COL1^='N1'));
+	run;
+
+%end; 
+%mend non_adar;
+%non_adar;
+ 
+
+
+	 data sar_denom;
+	     set _count;
+		 where COL1='N1';
+		 rename n=denom;
+	 run;
+
+	 data count;
+	    set _count;
+		if col1^='N1' then _indent_=_indent_+2;
+		if col1='N1' then do;
+            col1=strip(put(PARAMCD,$param.))||' - N1';
+		end;
+		if col1 in ('Grade 0','Missing') then delete;
+		if PARAMCD in ('TOTAL','LOCAL','SYSTEMIC') then do;
+            if col1='Any' then col1='Any '||strip(put(PARAMCD,$param.));
+		end;
+		else do;
+		    _indent_=_indent_+2;
+		end;
+
+		_section_=byvar1_order;
+		if index(col1,'Grade') then _indent_=4;
+	run;
+
+
+*** Derive percentages;
+%ma_n_pcnt
+ (  in_data = count
+  , subgroup = &cohortn.
+  , in_numerator = n
+  , in_denom_data = sar_denom
+  , in_denom_var = denom
+  , in_denom_merge_vars = &cohortn. PARAMCD &_default_trtvar
+  , no_pcnt_if = %str(_order1_=1)     
+  , trigger_pcnt_sign = &_default_trigger_pcnt_sign.
+  , trigger_tight_paren = &_default_trigger_tight_paren.
+  , trigger_n_space_pcnt = &_default_trigger_n_space_pcnt.
+  , blank_for_zero_denom = &_default_blank_for_zero_denom. 
+  , out_data = N_PCNT
+  , out_pcnt = pcnt
+  , out_display_var = n_pcnt
+ );
+
+/* %clopper in below blankprogram macro */
+%blankprogram;
+
+data shell_ci;
+    set N_PCNT(drop=n pcnt n_pcnt);
+    where PARAMCD in ('TOTAL','LOCAL','SYSTEMIC') and ATOXGRN='N1';
+    ATOXGRN='CI';
+    _indent_=4;
+    _order1_=3.5;
+	col1='95% CI';
+run;
+
+data _ci_all(where=(covbln^=9) drop=&_default_trtvar.);
+    length PARAMCD $8;
+    set CI_AR(in=a) CI_LAR(in=b) CI_SAR(in=c);
+	if a then paramcd='TOTAL';
+	if b then paramcd='LOCAL';
+	if c then paramcd='SYSTEMIC';
+
+	array _dumgrp (3) $200 AGEGR1 AGEGR3 RISKGR1;
+	if AGEGR1='>=18 and <65 Years' then agegr1n = 1;
+	else if AGEGR1='>=65 Years' then agegr1n = 2;
+
+	if AGEGR3='>=18 and <65 Years' then agegr3n = 1;
+	else if AGEGR3='>=65 and <75 Years' then agegr3n = 2;
+	else if AGEGR3='>=75 and <85 Years' then agegr3n = 3;
+	else if AGEGR3='>=85 Years' then agegr3n = 4;
+
+
+	if upcase(RISKGR1)='AT RISK' then riskgr1n = 1;
+	else if upcase(RISKGR1)='NOT AT RISK' then riskgr1n = 2;
+
+	%if &subgroup.=rskf or &subgroup.=rskf_title %then %do;
+	if covbln=13 then rskf1='rskf1';
+	else if covbln=14 then rskf2='rskf2';
+	else if covbln=15 then rskf3='rskf3';
+	else if covbln=16 then rskf4='rskf4';
+	else if covbln=17 then rskf5='rskf5';
+	else if covbln=18 then rskf6='rskf6';
+	%end;
+
+	%if &subgroup.=riskfn or &subgroup.=riskfn_title %then %do;
+	array _rsk(6) $200 rskf1 rskf2 rskf3 rskf4 rskf5 rskf6;
+	if covbln=5 then riskgr1n=2;
+	else if covbln=6 then rskf1='rskf1';
+	else if covbln=7 then do;
+		rskf1='rskf1'; rskf2='rskf2'; rskf3='rskf3'; rskf4='rskf4'; rskf5='rskf5';
+	end;
+	%end;
+
+	%if &subgroup.=agegn4 or &subgroup.=agegn4_title %then %do;
+	if covbln=5 then agegr4n=1;
+	else if covbln=6 then agegr4n=2;
+	else if covbln=7 then agegr4n=3;
+	trt01an=.;
+	%end;
+
+	%if &subgroup.^=agegn4 and &subgroup.^=agegn4_title %then %do;
+	%process_covbln(spanYN=,spaner=&subgroup.);
+	%end;
+run;
+
+data ci_all;
+	set _ci_all;
+	where covbln^=9;
+	&_default_trtvar.=strip(put(trt,$trtdsp2_.));
+run;
+proc sort tagsort data=ci_all nodupkey; by _all_; run;
+
+proc sql noprint;
+    create table _N_PCNT_CI as
+	select a.*, b.lowerCL, b.UpperCL
+	from shell_ci as a left join ci_all as b
+	on a.&_default_trtvar.=b.&_default_trtvar. and a.paramcd=b.paramcd 
+		%if &subtitfl.=Y %then %do; and a.covbln=b.covbln %end;
+	order by _section_, _skipvar_, byvar1_order, PARAMCD, _order1_, _indent_, col1
+	;
+quit;
+
+data N_PCNT_CI;
+    set _N_PCNT_CI;
+	if nmiss(lowerCL,UpperCL)=0 then n_pcnt=strip(put(round(lowerCL,.1),8.1))||", "||strip(put(round(UpperCL,.1),8.1));
+	else n_pcnt="&n_a.";
+run;
+
+data N_PCNT_all;
+    set N_PCNT N_PCNT_CI;
+run;
+
+proc sort data=n_pcnt_all nodupkey; by _all_; run;
+
+*** Transpose treatments to columns;
+%mu_transpose
+ (  in_data = N_PCNT_all
+  %if &subtitfl.=Y %then %do;
+  , transpose_by = byvar2_order covbln fmtd_covbln _section_ _skipvar_ byvar1_order PARAMCD _order1_ _indent_ col1
+  %end; %else %do;
+  , transpose_by = _section_ _skipvar_ byvar1_order PARAMCD _order1_ _indent_ col1
+  %end;
+  , transpose_vars = n_pcnt
+  , transpose_id = &_default_trtvar.
+  , out_data = TRANSP_PCNT
+ );
+
+ 
+data allparts;
+	set transp_pcnt ;
+	if paramcd='TOTAL' then _skipvar_=1;
+	else if paramcd in ('LOCAL','PAIN','ERYTHDIA','SWELLDIA','LYMPH') then _skipvar_=2;
+	else if paramcd in ('SYSTEMIC','FEVER','HEADACHE','FATIGUE','MYALGIA','ARTHRALG','NAUSEA','CHILLS') then _skipvar_=3;
+run;
+
+proc sort data=allparts;
+	by %if &subtitfl.=Y %then %do; byvar2_order covbln fmtd_covbln %end; _section_ _skipvar_ byvar1_order PARAMCD _order1_ _indent_;
+run;
+ 
+%if %symexist(g_outtype)=0 %then %do;
+%mr_pack
+  (  in_data=allparts
+   , out_data=MR_PACK
+   , var=col1
+   , packvar_label =
+   , page_width_chars = &_default_page_width_chars.
+   , col1_width_pcnt = &_default_col1_width_pcnt.
+   , indent=_indent_
+  );
+
+ *** Get title & footnote;
+%get_tf
+ (  tlf_progname = &get_tf_id. 
+  , escapechar = &_default_escapechar.
+ );
+
+%subtitle(subt=&subtitfl.);
+
+%mu_lines_per_page 
+ (  in_data = MR_PACK
+  , metadata_filepath = &g_deliverableid._tf
+  , tlf_progname = &g_deliverableid.
+  , globaltfs = 1
+  , headerLines = 
+  , nested_headerLines =   
+  , spanner_lines  =   
+  , linesPerPage = &_default_page_length_lines.
+  , escapechar =  &_default_escapechar.
+  , prcode_split  =  &_default_prcode_split.
+  , rtfwidth = &_default_page_width_chars.
+  , subgroup_var = &cohortn.
+ );
+
+%if &subtitfl.=N %then %do;
+%mr_pagebreak_table
+ (  vartx               = pack_col1 N_PCNT_99
+  , lines_left_on_page  = &g_linesleft.
+  , in_data             = MR_PACK
+  , out_data            = pagebreak
+  , escapechar          = &_default_escapechar.
+  , subgrp				= 
+  , section             = _section_
+  , section_protection  = y
+  , lineskip            = 1 
+ );
+%end; %else %do;
+%mu_get_sort_order(MR_PACK);
+%mu_wordscan(string=&cohortn. PARAMCD, root=bv, numw=numbv, delim=%str() )
+**&&bv&numbv will resolve to the last variable listed in the BYVAR string;
+%mr_pagebreak_table
+ (  vartx               = pack_col1 N_PCNT_99
+  , lines_left_on_page  = &g_linesleft.
+  , in_data             = MR_PACK
+  , out_data            = pagebreak
+  , escapechar          = &_default_escapechar.
+  , orderby             = &sort_order.
+  , subgrp				= &cohortn.
+  , section             = &&bv&numbv
+  , section_protection  = y
+  , lineskip            = 1 
+ );
+%end;
+
+
+** align the columns;
+* deciaml align the categorical results ;
+%mu_align
+  ( in_data      = pagebreak
+  , out_data     = _FINAL
+  , colprefix    = n_pcnt_
+  , align        = D
+  ,left_spacing  = 900
+  ,process_if=index(COL1,'CI')=0
+  );
+
+%mu_align
+  ( in_data      = _FINAL
+  , out_data     = __FINAL
+  , colprefix    = n_pcnt_
+  , align        = C
+  , process_if=index(COL1,'CI')^=0
+  );
+
+data final;
+	set __FINAL;
+	_section_=_skipvar_;
+	%if &subtitfl.=Y %then %do; format &cohortn. &subtitle_fmt.; %end;
+run;
+%end;
+%mend sar_bygrade;
+
+%sar_bygrade;

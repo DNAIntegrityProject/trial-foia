@@ -1,0 +1,583 @@
+*************************************************************************************************;
+* 
+*           CLIENT:  ModernaTX, Inc.
+*         PROTOCOL:  mRNA-1273-P301
+*
+*          PURPOSE: Create analysis dataset adarp7d
+*      
+*      INPUT FILES: SDTM domains
+*     OUTPUT FILES: ADARP7D.sas7bdat
+*
+*      USAGE NOTES: 
+*      
+*************************************************************************************************;
+*  Copyright 2020 Pharmaceutical Product Development, Inc.
+*  All Rights Reserved. 
+*************************************************************************************************;
+
+options noquotelenmax;
+%include "madam.sas";
+
+**Assign global macro variable DSETNAME to reflect the name of the final ADaM dataset**;
+%global DSETNAME;
+%let dsetname = adarp7d;
+%let adslvar=tr01sdt tr01sdtm tr01edt tr01edtm dose2dt dos2dtm
+			 tr02sdt tr02sdtm oldos2dt oldo2dtm;
+
+
+proc format;
+	value $param
+	"LYMPH" = "Underarm Gland Swelling or Tenderness"
+	"PAIN" = "Pain"
+	"ERYTHDIA" = "Erythema Longest Diameter (mm)"
+	"SWELLDIA" = "Swelling Longest Diameter (mm)"
+	"HEADACHE" = "Headache"
+	"FATIGUE" = "Fatigue"
+	"MYALGIA" = "Myalgia"
+	"ARTHRALG" = "Arthralgia"
+	"NAUSEA" = "Nausea/Vomiting"
+	"CHILLS" = "Chills"
+ 	"MEDATTEN" = 'Receive Medical Attention?' 
+	"FEVER" = "Fever (C)"
+	'MEDTAKP'='Prevent Pain or Fever from Occurring'
+	'MEDTAKT'='Treat Pain or Fever already Occurred' 
+	'MEDTAK'='Medication Taken Today for Pain or Fever';
+run;
+
+%macro supp_merge_test(domain);
+	%if %sysfunc(exist(trans.supp&domain.))=1 %then %do;
+		%revsupp(libin=Trans,libout=WORK,ds=&domain.,supp=trans.supp&domain.,outds=&domain._all);
+	%end;
+	%else %do;
+		data &domain._all;
+			set trans.&domain.;
+		run;
+	%end;
+%mend supp_merge_test;
+%supp_merge_test(face);
+%supp_merge_test(faae);
+
+**Merge supplemental data onto parent domain**;
+%revsupp(libin=trans,libout=work,ds=vs,supp=suppvs,outds=vs_all);
+
+data vs_all;
+	set vs_all;
+	output;
+
+	if MEDTAK=:'Y' then do;
+		vstestcd='MEDTAK';
+		vsorres='Y'; vsstresc='Y';
+		vsorresu=''; vsstresn=.;
+		output;
+	end;
+	if MEDTAKP=:'Y' then do;
+		vstestcd='MEDTAKP';
+		vsorres='Y'; vsstresc='Y';
+		vsorresu=''; vsstresn=.;
+		output;
+	end;
+	if MEDTAKT=:'Y' then do;
+		vstestcd='MEDTAKT';
+		vsorres='Y'; vsstresc='Y';
+		vsorresu=''; vsstresn=.;
+		output;
+	end; 
+run;
+
+DATA FACE_ALL;
+	SET FACE_ALL;
+
+	**derive param and paramcd;
+	if faobj='Underarm Gland Swelling or Tenderness' then PARAMCD = 'LYMPH';
+	else if faobj in ('Pyrexia' 'Fever') then PARAMCD = 'FEVER';
+	else if faobj='Pain' then PARAMCD = 'PAIN';
+	else if faobj='Nausea/Vomiting' then PARAMCD = 'NAUSEA';
+	else if faobj='Erythema' then PARAMCD = 'ERYTHDIA';
+	else if faobj='Swelling' then PARAMCD = 'SWELLDIA';
+	else if faobj='Headache' then PARAMCD = 'HEADACHE';
+	else if faobj='Fatigue' then PARAMCD = 'FATIGUE';
+	else if faobj='Myalgia' then PARAMCD = 'MYALGIA';
+	else if faobj='Arthralgia' then PARAMCD = 'ARTHRALG';
+	else if faobj='Chills' then PARAMCD = 'CHILLS';
+ 	else if faobj='Receive Medical Attention' then PARAMCD = 'MEDATTEN'; 
+
+	if PARAMCD in ('LYMPH' 'PAIN' 'ERYTHDIA' 'SWELLDIA' 'HEADACHE' 'FATIGUE'
+		'MYALGIA' 'ARTHRALG' 'NAUSEA' 'CHILLS' 'MEDATTEN' 'FEVER') then PARAM = put(PARAMCD,$param.);
+	else PARAM = faobj;
+RUN;
+DATA FAAE_ALL;
+	SET FAAE_ALL;
+
+	**derive param and paramcd;
+	if faobj='Underarm Gland Swelling or Tenderness' then PARAMCD = 'LYMPH';
+	else if faobj in ('Pyrexia' 'Fever') then PARAMCD = 'FEVER';
+	else if faobj='Pain' then PARAMCD = 'PAIN';
+	else if faobj='Nausea/Vomiting' then PARAMCD = 'NAUSEA';
+	else if faobj='Erythema' then PARAMCD = 'ERYTHDIA';
+	else if faobj='Swelling' then PARAMCD = 'SWELLDIA';
+	else if faobj='Headache' then PARAMCD = 'HEADACHE';
+	else if faobj='Fatigue' then PARAMCD = 'FATIGUE';
+	else if faobj='Myalgia' then PARAMCD = 'MYALGIA';
+	else if faobj='Arthralgia' then PARAMCD = 'ARTHRALG';
+	else if faobj='Chills' then PARAMCD = 'CHILLS';
+ 	else if faobj='Receive Medical Attention' then PARAMCD = 'MEDATTEN'; 
+
+	if PARAMCD in ('LYMPH' 'PAIN' 'ERYTHDIA' 'SWELLDIA' 'HEADACHE' 'FATIGUE'
+		'MYALGIA' 'ARTHRALG' 'NAUSEA' 'CHILLS' 'MEDATTEN' 'FEVER') then PARAM = put(PARAMCD,$param.);
+	else PARAM = faobj;
+RUN;
+
+**keep the subjects with FEVER in both FAAE/VS**;
+data VS_FV_subjid;
+	set vs_all(where=(^(^(vstptnum>7 and vscat='REACTOGENICITY') or vsstat = "NOT DONE")   
+		%if %lowcase(&DSETNAME.)=adarp7d %then %do; and ^missing(VSTPTREF) %end;));
+	if vstestcd='TEMP';
+	paramcd='FEVER';
+	FATPTREF=VSTPTREF;
+	keep usubjid subjid PARAMCD FAtptref;
+run;
+data FAAE_fv_subjid;
+	set faae_all(where=(^((lowcase(faobj) in ('erythema' 'swelling') and fatest='Occurrence Indicator' and 
+		FAORRES='Y') or fastat = "NOT DONE") 
+		%if %lowcase(&DSETNAME.)=adarp7d %then %do; and ^missing(FATPTREF) and fastresc not in ('NONE','') and find(fastresc,'GRADE 0')=0 %end;
+		%else %do; and FAEVAL='STUDY SUBJECT' %end;));
+	if paramcd='FEVER';
+	VSTESTCD='TEMP';
+	VSTPTREF=FATPTREF;
+	keep usubjid VSTESTCD vstptref;
+run; 
+
+data VS_subjid;
+	set vs_all(where=(^(^(vstptnum>7 and vscat='REACTOGENICITY') or vsstat = "NOT DONE") 
+		%if %lowcase(&DSETNAME.)=adarp7d %then %do; and ^missing(VSTPTREF) %end;))
+		FAAE_FV_SUBJID;
+	keep usubjid subjid VSTESTCD vstptref;
+run;
+data FAAE_subjid;
+	set faae_all(where=(^((lowcase(faobj) in ('erythema' 'swelling') and fatest='Occurrence Indicator' and
+		FAORRES='Y') or fastat = "NOT DONE")  
+		%if %lowcase(&DSETNAME.)=adarp7d %then %do; and ^missing(FATPTREF) and fastresc not in ('NONE','') and find(fastresc,'GRADE 0')=0 %end;
+		%else %do; and FAEVAL='STUDY SUBJECT' %end;))
+		vs_fv_subjid;
+	keep usubjid subjid FATESTCD fatest faobj FAORRES PARAMCD FATPTREF;
+run; 
+
+proc sql noprint;
+	create table _FAAE_subjid as
+	select distinct usubjid,PARAMCD,FATPTREF
+	from FAAE_subjid
+	order by usubjid,PARAMCD,FATPTREF;
+quit;
+proc sql noprint;
+	create table _VS_subjid as
+	select distinct usubjid,VSTESTCD,vstptref
+	from VS_subjid
+	order by usubjid,VSTESTCD,vstptref;
+quit;
+PROC SORT DATA=vs_all;by usubjid  VSTESTCD vstptref;run;
+PROC SORT DATA=face_all;by usubjid  PARAMCD FATPTREF;run;
+PROC SORT DATA=faae_all;by usubjid  PARAMCD FATPTREF;run;
+
+
+data VS1;
+	merge vs_all(in=a) _VS_subjid(in=b);
+	by usubjid VSTESTCD vstptref;
+	if (a and b and index(vstestcd,'MEDTA')=0) or index(vstestcd,'MEDTA');
+run;
+data FACE1;
+	merge face_all(in=a) _FAAE_subjid(in=b);
+	by usubjid  PARAMCD FATPTREF;
+	if a and b;
+run;
+
+data FAAE1;
+	merge faae_all(in=a) _FAAE_subjid(in=b);
+	by usubjid  PARAMCD FATPTREF;
+	if a and b;
+run;
+
+** set source data together;
+data combine(DROP=PARAM PARAMCD /*rename=(AEMAFL=MAAEFL)*/);
+	set	FAAE1(in=faae where=( ^((lowcase(faobj) in ('erythema' 'swelling') and fatest='Occurrence Indicator') or fastat = "NOT DONE" or UPCASE(facat) ^= "REACTOGENICITY" or fastresc in ('NONE','') or find(fastresc,'GRADE 0'))))
+	    vs1(in=vs where=((vscat='REACTOGENICITY'  and vsstat ^= "NOT DONE") or index(vstestcd,'MEDTA')))
+		FACE1(in=face WHERE=( ^((lowcase(faobj) in ('erythema' 'swelling') and fatest='Occurrence Indicator') or fastat = "NOT DONE" or UPCASE(facat) ^= "REACTOGENICITY" or fastresc in ('NONE','') or find(fastresc,'GRADE 0'))));
+run;
+
+
+
+**KEEP NEED SUBJID;
+**add adsl variable and choose subjid in adsl;
+proc sort tagsort data=combine; by usubjid ; run;
+
+data combine_adsl;
+	merge combine(in=a) adb.adsl(in=b keep=USUBJID  &adslvar.);
+	by usubjid ;
+	if a and b;
+run;
+
+
+data combine_final;
+	length PARCAT1 atptgr1 $50 AVALC atpt $100 PARAMCD $8 _war param $200 ;
+	set combine_adsl;
+	
+	* Analysis Datetime;
+	if domain='VS' then fadtc = vsdtc;
+	%ISO2SAS(isodate=fadtc, datec=_fadtc, daten=ADT, timec=_atm);
+	if ^missing(_atm) and ^missing(ADT) then ADTM = input(compress(put(ADT,date9.)||':'||_atm),datetime20.);
+	if ^missing(_atm) then ATM = input(_atm,time5.);
+
+	if domain="FA" then ady=fady;
+	else if domain="VS" then ady=vsdy;
+
+	* Most Recent Dose Reference;
+	%xxdoserf(xx=FA,adt=ADT,adtm=ADTM,rddy=RDDY);
+
+	if domain = "FA" AND INDEX(compress(FATPTREF),'DOSE1')>0 THEN ATPTREF = "Vaccination 1";
+	else if  domain = "FA" AND INDEX(compress(FATPTREF),'DOSE2')>0 THEN ATPTREF = "Vaccination 2";
+	else if domain = "VS" AND INDEX(compress(VSTPTREF),'DOSE1')>0 THEN ATPTREF = "Vaccination 1";
+	else if  domain = "VS" AND INDEX(compress(VSTPTREF),'DOSE2')>0 THEN ATPTREF = "Vaccination 2";
+
+	** parameter category and numerica format;
+	if domain="FA" AND UPCASE(FASCAT)="ADMINISTRATION SITE" THEN PARCAT1 = "LOCAL";
+	ELSE IF domain="FA" THEN PARCAT1 = FASCAT;
+	ELSE PARCAT1 = vsscat;
+
+	** atpt atptn;
+	if domain="FA"  THEN atpt = strip(fatpt);
+	ELSE atpt = strip(vstpt);
+	
+	%if %lowcase(&DSETNAME.)=adarp7d %then %do;
+	if fatpt='DAY 1' and FAEVAL='INVESTIGATOR' then atpt='DAY 1, AFTER VACCINATION (AT HOME)';
+	%end;
+
+	if atpt = "DAY 1, 30 MINUTES AFTER VACCINATION (AT STUDY CLINIC)" then atptn = 1.1;
+	else if atpt = "DAY 1, AFTER VACCINATION (AT HOME)" then atptn = 1.2;
+	else atptn =input(compress(atpt,'DAY '),??BEST.);
+
+	IF PARCAT1="LOCAL" THEN PARCAT1N = 1;
+	ELSE IF PARCAT1="SYSTEMIC" THEN PARCAT1N = 2;
+	
+
+	**derive param and paramcd;
+	if vstestcd in ('TEMP' 'VSALL') or faobj in ('Pyrexia' 'Fever') then PARAMCD = 'FEVER';
+	else if faobj='Underarm Gland Swelling or Tenderness' and fatestcd='SEV' then PARAMCD = 'LYMPH';
+	else if faobj='Pain' then PARAMCD = 'PAIN';
+	else if faobj='Nausea/Vomiting' and fatestcd='SEV' then PARAMCD = 'NAUSEA';
+	else if faobj='Erythema' and find(upcase(fatest),'OCCURRENCE') and upcase(faorres) in ('N' 'NO') then PARAMCD = 'ERYTHDIA';
+	else if faobj='Swelling' and find(upcase(fatest),'OCCURRENCE') and upcase(faorres) in ('N' 'NO') then PARAMCD = 'SWELLDIA';
+	else if faobj='Erythema' and find(upcase(fatest),'INTENSITY') then PARAMCD = 'ERYTHDIA';
+	else if faobj='Swelling' and find(upcase(fatest),'INTENSITY') then PARAMCD = 'SWELLDIA';
+	else if faobj='Erythema' and fatest='Longest Diameter' then PARAMCD = 'ERYTHDIA';
+	else if faobj='Swelling' and fatest='Longest Diameter' then PARAMCD = 'SWELLDIA';
+	else if faobj='Headache' then PARAMCD = 'HEADACHE';
+	else if faobj='Fatigue' then PARAMCD = 'FATIGUE';
+	else if faobj='Myalgia' then PARAMCD = 'MYALGIA';
+	else if faobj='Arthralgia' then PARAMCD = 'ARTHRALG';
+	else if faobj='Chills' then PARAMCD = 'CHILLS';
+ 	else if faobj='Receive Medical Attention?' then PARAMCD = 'MEDATTEN'; 
+	else if vstestcd=:'MEDTA' then PARAMCD = vstestcd;
+	else if ^missing(faobj) or ^missing(fatestcd) or ^missing(vstestcd) then do;
+		_war = 'Put Aler'||'t_A: PARAMCD needs udapte. ';
+		put _war SUBJID= FATESTCD= VSTESTCD= FAOBJ=;
+	end;
+
+	if PARAMCD in ('LYMPH' 'PAIN' 'ERYTHDIA' 'SWELLDIA' 'HEADACHE' 'FATIGUE'
+		'MYALGIA' 'ARTHRALG' 'NAUSEA' 'CHILLS' 'MEDATTEN' 'FEVER') or index(PARAMCD,'MEDTA') then PARAM = put(PARAMCD,$param.);
+	else PARAM = faobj;
+
+	* AVALC, AVAL;
+/*	if upcase(faorres) in ('N' 'NO') and FATEST='Occurrence Indicator' and PARAMCD in ('ERYTHDIA' 'SWELLDIA') then do; AVAL = 0; AVALC = fastresc; end;*/
+	if domain='VS' then do; AVAL = vsstresn; AVALC = vsstresc; end;
+	else do; AVAL = fastresn; AVALC = fastresc; end;
+
+
+	* Analysis Toxicity Grade;
+	if PARAMCD in ('ERYTHDIA' 'SWELLDIA') then do;
+		if .<AVAL<25 then delete;
+		else if 25<=AVAL<=50 or find(fastresc,'GRADE 1') then ATOXGRN = 1;
+		else if 50<AVAL<=100 or find(fastresc,'GRADE 2') then ATOXGRN = 2;
+		else if AVAL>100 or find(fastresc,'GRADE 3') then ATOXGRN = 3;
+		else if find(fastresc,'GRADE 4') then ATOXGRN = 4;
+	end;
+	else if PARAMCD='FEVER' then do;
+		if .<AVAL<38.0 then delete;
+		else if 38.0<=AVAL<=38.4 or find(fastresc,'GRADE 1') then ATOXGRN = 1;
+		else if 38.4<AVAL<=38.9 or find(fastresc,'GRADE 2') then ATOXGRN = 2;
+		else if 38.9<AVAL<=40.0 or find(fastresc,'GRADE 3') then ATOXGRN = 3;
+		else if AVAL>40.0 or find(fastresc,'GRADE 4') then ATOXGRN = 4;
+	end;
+	else if PARAMCD in ('PAIN' 'LYMPH' 'HEADACHE') then do;
+/*		if upcase(AVALC)='NONE' or find(fastresc,'GRADE 0') then ATOXGRN = 0; */
+		if upcase(AVALC)='DOES NOT INTERFERE WITH ACTIVITY' or find(fastresc,'GRADE 1') then ATOXGRN = 1; 
+		else if upcase(AVALC)='NO INTERFERENCE WITH ACTIVITY' or find(fastresc,'GRADE 1') then ATOXGRN = 1;
+		else if index(upcase(AVALC),'REPEATED') or find(fastresc,'GRADE 2') then ATOXGRN = 2;
+		else if upcase(AVALC)='ANY USE OF PRESCRIPTION RELIEVER OR PREVENTS DAILY ACTIVITY' or find(fastresc,'GRADE 3') then ATOXGRN = 3;
+		else if upcase(AVALC)='ANY USE OF PRESCRIPTION PAIN RELIEVER OR PREVENTS DAILY ACTIVITY' or find(fastresc,'GRADE 3') then ATOXGRN = 3;
+		else if find(fastresc,'GRADE 4') then ATOXGRN = 4;
+		else if ^missing(AVALC) then do;
+			_war = 'Put Aler'||'t_A: ATOXGR needs udapte. ';
+			put _war SUBJID= PARAMCD= PARAM=;
+			put _war AVALC=;
+		end;
+	end;
+	else if PARAMCD in ('FATIGUE' 'MYALGIA' 'ARTHRALG') then do;
+/*		if upcase(AVALC)='NONE' or find(fastresc,'GRADE 0') then ATOXGRN = 0; */
+		if upcase(AVALC)='NO INTERFERENCE WITH ACTIVITY' or find(fastresc,'GRADE 1') then ATOXGRN = 1; 
+		else if upcase(AVALC)='SOME INTERFERENCE WITH ACTIVITY' or find(fastresc,'GRADE 2') then ATOXGRN = 2;
+		else if upcase(AVALC)='SIGNIFICANT; PREVENTS DAILY ACTIVITY' or find(fastresc,'GRADE 3') then ATOXGRN = 3;
+		else if find(fastresc,'GRADE 4') then ATOXGRN = 4;
+		else if ^missing(AVALC) then do;
+			_war = 'Put Aler'||'t_A: ATOXGR needs udapte. ';
+			put _war SUBJID= PARAMCD= PARAM=;
+			put _war AVALC=;
+		end;
+	end;
+	else if PARAMCD='NAUSEA' then do;
+/*		if upcase(AVALC)='NONE' or find(fastresc,'GRADE 0') then ATOXGRN = 0; */
+		if upcase(AVALC)='NO INTERFERENCE WITH ACTIVITY OR 1-2 EPISODES/24 HOURS' or find(fastresc,'GRADE 1') then ATOXGRN = 1; 
+		else if upcase(AVALC)='SOME INTERFERENCE WITH ACTIVITY OR >2 EPISODES/24 HOURS' or find(fastresc,'GRADE 2') then ATOXGRN = 2;
+		else if upcase(AVALC)='PREVENTS DAILY ACTIVITY, REQUIRES OUTPATIENT IV HYDRATION' or find(fastresc,'GRADE 3') then ATOXGRN = 3;
+		else if find(fastresc,'GRADE 4') then ATOXGRN = 4;
+		else if ^missing(AVALC) then do;
+			_war = 'Put Aler'||'t_A: ATOXGR needs udapte. ';
+			put _war SUBJID= PARAMCD= PARAM=;
+			put _war AVALC=;
+		end;
+	end;
+	else if PARAMCD='CHILLS' then do;
+/*		if upcase(AVALC)='NONE' or find(fastresc,'GRADE 0') then ATOXGRN = 0; */
+		if upcase(AVALC)='NO INTERFERENCE WITH ACTIVITY' or find(fastresc,'GRADE 1') then ATOXGRN = 1; 
+		else if upcase(AVALC)='SOME INTERFERENCE WITH ACTIVITY NOT REQUIRING MEDICAL ATTENTION' or find(fastresc,'GRADE 2') then ATOXGRN = 2;
+		else if upcase(AVALC)='PREVENTS DAILY ACTIVITY AND REQUIRES MEDICAL ATTENTION' or find(fastresc,'GRADE 3') then ATOXGRN = 3;
+		else if find(fastresc,'GRADE 4') then ATOXGRN = 4;
+		else if ^missing(AVALC) then do;
+			_war = 'Put Aler'||'t_A: ATOXGR needs udapte. ';
+			put _war SUBJID= PARAMCD= PARAM=;
+			put _war AVALC=;
+		end;
+	end;
+
+	if ^missing(ATOXGRN) then ATOXGR = 'Grade '||strip(put(ATOXGRN,best.));
+
+	** Surce Data, Sequence, Variable;
+	if domain='VS' then do; SRCDOM = DOMAIN; SRCSEQ = VSSEQ; 
+        if PARAMCD='MEDTAKP' then SRCVAR ="SUPPVS.QVAL where QNAM='MEDTAKP'";
+        else if PARAMCD='MEDTAKT' then SRCVAR ="SUPPVS.QVAL where QNAM='MEDTAKT'";
+        else if PARAMCD='MEDTAK' then SRCVAR ="SUPPVS.QVAL where QNAM='MEDTAK'";
+        else SRCVAR = 'VSSTRESN'; 
+    end;
+	else do; SRCDOM = DOMAIN; SRCSEQ = FASEQ; SRCVAR = 'FASTRESC'; end;
+	
+	if PARAMCD in ('PAIN' 'ERYTHDIA' 'SWELLDIA','LYMPH') then anl01fl='Y';
+	
+	_atpgr=scan(atpt,1,',');
+	if _atpgr="DAY 1" then do;atptgr1='DAY 1';atptgr1n=1;end;
+	else do;atptgr1=atpt;_atptgr1n=compress(scan(atpt,2,' '),'.','dk');atptgr1n=input(_atptgr1n,best12.);end;
+	
+	if atptgr1n~=. then _atpta=1;
+run;
+
+***ANL04FL***;
+proc sort tagsort data=combine_final;
+	by USUBJID PARAMCD descending anl01fl ATPTREF descending _atpta ATPTGR1N adt atm;
+run;
+data anl04_;
+	set combine_final;
+	by USUBJID PARAMCD descending anl01fl ATPTREF descending _atpta ATPTGR1N;
+	if first.ATPTREF and atptgr1n>=8 and _atpta=1 and anl01fl='Y' then anl04fl='Y';
+	if anl04fl='Y';
+	keep USUBJID PARAMCD anl01fl ATPTREF anl04fl;
+run;
+data combine_final;
+	merge combine_final anl04_;
+	by USUBJID PARAMCD descending anl01fl ATPTREF;
+
+	if faeval='STUDY SUBJECT' then _faeval=1;
+	if faeval='' then _faeval=2;
+	if faeval='INVESTIGATOR' then _faeval=3;
+	if atoxgrn~=. then _agfl=1;
+run;
+
+***ANL05FL***;
+proc sort tagsort data=combine_final;
+	by usubjid param atptref atpt _agfl atoxgrn descending adt descending _faeval descending srcseq;
+run;
+data an03;
+	set combine_final;
+	by usubjid param atptref atpt _agfl atoxgrn descending adt descending _faeval;
+	if last.atpt and _agfl=1 then ANL05FL='Y';
+run;
+
+***ASEQ***;
+data adsl;
+	set adb.adsl;
+	where dose2fl='N';
+	atptref = "Vaccination 2";
+	dropfl= "Y";
+	keep usubjid  dropfl atptref;
+run;
+proc sql noprint;
+	create table an03_ as
+	select a.*,b.dropfl
+	from an03 as a
+	left join adsl as b
+	on a.usubjid=b.usubjid  and a.atptref=b.atptref;
+quit;
+
+data an04(drop=dropfl);
+	set an03_;
+	%if %lowcase(&DSETNAME.)=adarp7d %then %do; where dropfl ^= "Y"; %end;
+run;
+
+/****ANL04FL***;*/
+/*proc sql noprint;*/
+/*	create table __anl04fl as*/
+/*	select distinct USUBJID,  PARAMCD, ATPTREF, min(ATPTGR1N) as _min_atpt, */
+/*			max(ATPTGR1N) as _max_atpt, 'Y' as ANL04FL*/
+/*	from an04 where ATOXGRN>0*/
+/*	group by USUBJID, PARAMCD, ATPTREF*/
+/*	having .<_min_atpt<8 and _max_atpt>=8*/
+/*	order by USUBJID,  PARAMCD, ATPTREF;*/
+/*quit;*/
+/*proc sort tagsort data=an04; by USUBJID PARAMCD ATPTREF; run;*/
+
+***ANL02FL, ANL03FL***;
+proc sort tagsort data=an04 out=an05_1 nodupkey;
+	by USUBJID PARAMCD ATPTREF;
+	where ATPTN=7;
+run;
+
+proc sort tagsort data=an04 out=an05_2 nodupkey;
+	by USUBJID PARAMCD ATPTREF;
+	where ATPTN=8;
+run;
+
+proc sort tagsort data=an04; by usubjid paramcd atptref; run;
+data pre_final;
+    merge an04 
+		  an05_1(in=a keep=USUBJID PARAMCD ATPTREF) 
+		  an05_2(in=b keep=USUBJID PARAMCD ATPTREF);
+    by USUBJID PARAMCD ATPTREF;
+
+	if a then _flaga='on day 7';
+	if b then _flagb='on day 8';
+run;
+proc sort tagsort data=pre_final; by usubjid paramcd atptref; run;
+
+data an05;
+	set pre_final;
+	by usubjid paramcd atptref;
+
+	if paramcd in ('ERYTHDIA' 'LYMPH' 'PAIN' 'SWELLDIA') then do;
+		if _flaga^='' and _flagb^='' then _anl02fl = 'Y';
+		if not (_flaga^='' and _flagb^='') and ATPTN<=7 then _anl03fl = 'Y';
+	end;
+run;
+proc sort tagsort data=an05; by usubjid paramcd atptref descending ATPTN; run;
+
+data atptn;
+	set an05;
+	by usubjid paramcd atptref descending ATPTN;
+	
+	retain retain_atptn;
+	if first.atptref then retain_atptn = ATPTN;
+
+	if retain_atptn<=7 then delete;
+run;
+proc sort tagsort data=atptn; by usubjid paramcd atptref descending _anl02fl; run;
+
+data an02fl;
+	set atptn;
+	by usubjid paramcd atptref descending _anl02fl;
+
+	retain ANL02FL;
+	if first.atptref then ANL02FL = _anl02fl;
+run;
+proc sort tagsort data=an02fl; by usubjid paramcd atptref descending _anl03fl atptn; run;
+
+data an03fl;
+	set an02fl;
+	by usubjid paramcd atptref descending _anl03fl atptn;
+
+	retain ANL03FL;
+	if first.atptref and .<atptn<=7 then ANL03FL = _anl03fl;
+run;
+
+***ANL06FL***;
+
+proc sql noprint;
+    create table _an06_min as
+	select distinct usubjid, paramcd, atptref, min(ATPTGR1N) as min_ATPTGR1N
+	from an03fl
+	where ATOXGRN>0
+	group by usubjid, paramcd, atptref
+	having min_ATPTGR1N<8
+	order by usubjid, paramcd, atptref
+	;
+    create table _an06_max as
+	select distinct usubjid, paramcd, atptref, max(ATPTGR1N) as max_ATPTGR1N
+	from an03fl
+	where ATOXGRN>0
+	group by usubjid, paramcd, atptref
+	having max_ATPTGR1N>=8
+	order by usubjid, paramcd, atptref
+	;
+quit;
+
+data an06fl;
+    merge an03fl(in=a) _an06_min(in=b) _an06_max(in=c);
+	by usubjid paramcd atptref;
+	if a;
+	if b and c then anl06fl='Y';
+run;
+
+proc sort tagsort data=an06fl; by USUBJID PARCAT1 PARAMCD ATPTREF adt atm srcseq; run;
+
+data &DSETNAME.;
+	length STUDYID $14.;
+	set an06fl(rename=(STUDYID=_studyid));
+	by USUBJID PARCAT1 PARAMCD ATPTREF adt atm srcseq;
+	ASEQ + 1;
+	if first.usubjid then ASEQ = 1;
+
+	STUDYID=_studyid;
+	drop _: SUBJID;
+run;
+
+**Generate final dataset by updating certain attributes. Optionally merge common variables & create sequence variable as needed**;
+%trta(dsname=&DSETNAME.);
+
+%adam_dataset_update(
+	ds=&DSETNAME,
+	libin=work,
+	libout=output,
+	adsllib=adb,
+	addcomvar=Y,
+	addseq=,
+	dropinfmt=Y,
+	mapspecfile=&ADAM_SPEC,
+	maploc=&ADAM_SPEC_LOC,
+	debug=Y
+	);
+	
+**Generate Value Level Metadata values for the ad<xx> dataset**;
+%* dod_vlm(        
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&ADAM_SPEC_LOC,
+	specname=&ADAM_SPEC,
+	debug=N
+	);
+
+**Generate Enhanced Controlled Terminology for the ad<xx> dataset**;
+%* dod_enhcd_ct(            
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&ADAM_SPEC_LOC,
+	specname=&ADAM_SPEC,
+	map_ct_nm=,
+	map_ct_loc=,
+	debug=N
+	);

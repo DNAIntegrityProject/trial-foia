@@ -1,0 +1,211 @@
+*************************************************************************************************;
+* 
+*           CLIENT:  ModernaTX, Inc.
+*         PROTOCOL:  mRNA-1273-P201
+*
+*          PURPOSE: Create analysis dataset adcm
+*      
+*      INPUT FILES: SDTM domains
+*     OUTPUT FILES: ADCM.sas7bdat
+*
+*      USAGE NOTES: 
+
+*      
+*************************************************************************************************;
+*  (c) 2020 PPD
+*  All Rights Reserved. 
+*************************************************************************************************;
+
+dm'log;clear;output;clear';
+options missing = ' ' validvarname=upcase compress=yes;
+options mprint nomprint missing=' ';
+
+%include "madam.sas";
+/*%let adam_spec = Moderna mRNA1273P201 ADaM spec.xlsm;*/
+
+%revsupp(
+libin=TRANS, 
+libout=WORK, 
+ds=CM, 
+supp=SUPPCM,
+maploc=&G_PROJECTPATH.\&G_toplevel.\Databases\Transformed,
+mapspec=&G_NICKNAME._mapping_spec.xlsx
+);
+ 
+proc sort data=adb.adsl out=adsl; by studyid usubjid; run;
+
+data cm1;
+	merge   ADSL (in=ina)
+		cm (in=incm DROP=SUBJID)
+		;
+	by studyid usubjid;
+	
+	if ina and incm;
+
+	if ~missing(cmendtc) then chk= input(compress(cmendtc,'-'),anydtdte.);
+	if ~missing(tr01sdt) then trsdtc= put(tr01sdt,yymmdd10.);
+run;
+
+data cm_test;
+	merge   ADSL (in=ina)
+		cm (in=incm DROP=SUBJID)
+		;
+	by studyid usubjid;
+	
+	if ina=0 and incm=1;
+
+run;
+
+proc sort data=cm_test nodupkey; by studyid usubjid; run;
+
+proc print data=cm_test; var usubjid; title 'excluded CM Screen Failure patients'; run;
+
+data cm2;
+length CMSOLFL $1.;
+	set cm1 ;
+
+	*** ASTDT, AENDT ***;
+	format ASTDT AENDT Date9.;
+	if length(cmSTdtc)>=10 then  ASTDT=input(substr(cmSTdtc,1,10),is8601da.);
+	else do;
+		if length(compress(cmSTdtc,'-'))=4 then do;	/*MONTH DAY MISSING*/
+			ASTDTF='M';
+			if (missing(cmendtc) or (~missing(chk) and chk > tr01sdt)) and  (compress(cmSTdtc,'-')=substr(trsdtc,1,4)) then astdt = tr01sdt;
+			else if (length(cmendtc) = 4 and input(cmendtc, best.)  = year(tr01sdt)) and  (compress(cmSTdtc,'-')=substr(trsdtc,1,4)) then astdt = tr01sdt;
+			else ASTDT=input(substr(cmSTdtc,1,4)||'-01-01',yymmdd10.);
+		end;
+		else if length(compress(cmSTdtc,'-'))=6 then do; /*DAY MISSING*/
+			ASTDTF='D';
+			if (missing(cmendtc) or (~missing(chk) and chk > tr01sdt)) and  (compress(cmSTdtc,'-')=substr(compress(trsdtc,'-'),1,6)) then astdt = tr01sdt;
+			ASTDT=input(substr(cmSTdtc,1,7)||'-01',yymmdd10.);
+		end;
+	end;
+
+	if length(cmENdtc)>=10 then  AENDT=input(substr(cmENdtc,1,10),is8601da.);
+	else do;
+		if length(compress(cmENdtc,'-'))=4 then do;	/*MONTH DAY MISSING*/
+			AENDTF='M';
+			temp1=input(substr(cmENdtc,1,4)||'-12-31',yymmdd10.);
+			if not missing(eosdt) then temp2=input(put(eosdt, yymmdd10.), yymmdd10.);
+			if not missing(dthdt) then temp3=input(put(dthdt, yymmdd10.), yymmdd10.);
+			aendt = min(temp1,temp2,temp3);
+		end;
+		else if length(compress(cmENdtc,'-'))=6 then do; /*DAY MISSING*/
+			AENDTF='D';
+			temp1=intnx('month',input(substr(cmENdtc,1,7)||'-01',yymmdd10.),0,'E');
+			if not missing(eosdt) then temp2=input(put(eosdt, yymmdd10.), yymmdd10.);
+			if not missing(dthdt) then temp3=input(put(dthdt, yymmdd10.), yymmdd10.);
+			aendt = min(temp1,temp2,temp3);
+		end;
+	end;
+
+	*** ASTDY, AENDY ***;	
+	%calcdy(dt=astdt, dy=astdy);
+	%calcdy(dt=aendt, dy=aendy);
+
+	*** PREFL: "Y" ASTDT  < TR01SDT ***;
+	if TR01SDT ne .  then do;
+		if . < ASTDT <  TR01SDT or missing(ASTDT) then PREFL="Y";
+	end;
+		
+
+	*** ONTRTFL: 	"Y" if .<ASTDT <= TR01EDT + 27 days) and AENDT >= TR01SDT ***;
+	if  ~missing(TR01EDT) then do;
+		if (missing(AENDT) and .<ASTDT <= TR01EDT +27) then ONTRTFL='Y';
+		if ~missing(AENDT) then do;
+			if  (.<ASTDT <= TR01EDT +27 and AENDT >= TR01SDT > .) or (AENDT >= TR01SDT > . and missing(astdt)) then ONTRTFL='Y';
+		end;
+	 end;
+	
+	if missing(ASTDT) and missing(AENDT) then ONTRTFL = 'Y';
+	
+	*** FUPFL "Y" if AENDT > TR01EDT + 27 days or if day, month, and year are all missing in CMENDTC ***;
+	if TR01EDT ne . then do;
+		if AENDT > TR01EDT + 27 >. then FUPFL='Y';
+	end;
+	if missing(AENDT) then do;
+		FUPFL='Y';
+	end;
+
+	*** MDOSEREF ***;
+	if (. < TR01SDT <= ASTDT < DOSE2DT) or (. < TR01SDT <= ASTDT and missing(DOSE2DT)) then MDOSREF = 'Vaccination 1';
+	if (. < DOSE2DT <= ASTDT) then MDOSREF = 'Vaccination 2';
+
+
+	*** MRDSTDY ***;
+	if MDOSREF = 'Vaccination 1' then MRDSTDY = astdt - tr01sdt + 1;
+	if MDOSREF = 'Vaccination 2' then MRDSTDY = astdt - dose2dt + 1;
+
+	*** CMMOINM1 CMMOI1FL CMMOINM2 CMMOI2FL ***;
+
+	if index(upcase(CMINDC),'PROPHYLAX')>0 and (index(upcase(CMDECOD),'PARACETAMOL')>0 or 
+												index(upcase(CMDECOD),'DIPHENHYDRAMINE HYDROCHLORIDE;PARACETAMOL')>0 or 
+												index(upcase(CMDECOD),'IBUPROFEN')>0 or 
+												index(upcase(CMDECOD),'DIPHENHYDRAMINE CITRATE;IBUPROFEN')>0 or 
+												index(upcase(CMDECOD),'DIPHENHYDRAMINE HYDROCHLORIDE;IBUPROFEN')>0 or 
+												index(upcase(CMDECOD),'NAPROXEN SODIUM')>0 or
+												index(compress(upcase(CMDECOD)),'DEXTROMETHORPHANHYDROBROMIDE;GUAIFENESIN;PARACETAMOL;PSEUDOEPHEDRINEHYDROCHLORIDE')>0 or
+												index(compress(upcase(CMDECOD)),'DEXTROMETHORPHANHYDROBROMIDE;DOXYLAMINESUCCINATE;EPHEDRINESULFATE;ETHANOL;PARACETAMOL')>0 or 
+												index(compress(upcase(CMDECOD)),'ACETYLSALICYLICACID;CAFFEINE;PARACETAMOL')>0
+												)
+											then CMMOI1FL = 'Y';
+
+	if index(upcase(CMDECOD),'PARACETAMOL')>0 or 
+		index(upcase(CMDECOD),'DIPHENHYDRAMINE HYDROCHLORIDE;PARACETAMOL')>0 or 
+		index(upcase(CMDECOD),'IBUPROFEN')>0 or 
+		index(upcase(CMDECOD),'DIPHENHYDRAMINE CITRATE;IBUPROFEN')>0 or 
+		index(upcase(CMDECOD),'DIPHENHYDRAMINE HYDROCHLORIDE;IBUPROFEN')>0 or 
+		index(upcase(CMDECOD),'NAPROXEN SODIUM')>0 or 
+		index(upcase(CMDECOD),'DEXTROMETHORPHAN HYDROBROMIDE;GUAIFENESIN;PARACETAMOL;PSEUDOEPHEDRINE HYDROCHLORIDE')>0 or
+		index(upcase(CMDECOD),'DEXTROMETHORPHAN HYDROBROMIDE;DOXYLAMINE SUCCINATE;EPHEDRINE SULFATE;ETHANOL;PARACETAMOL')>0 or 
+		index(upcase(CMDECOD),'ACETYLSALICYLIC ACID;CAFFEINE;PARACETAMOL')>0
+	then CMMOI2FL = 'Y';
+
+	*** variables from SUPPCM ***;
+	if not missing(CMUOTHSP) then CMUOTHSP = CMUOTHSP;
+	if not missing(CMFOTHSP) then CMFOTHSP = CMFOTHSP;
+	if not missing(CMROTHSP) then CMROTHSP = CMROTHSP; 
+	if not missing(CMSOL) then CMSOLFL = strip(CMSOL);	 
+run;
+
+proc sort data=cm2; by usubjid; run;	
+
+data adcm;
+	set cm2;
+run;
+
+%ADaM_Dataset_Update(
+    ds=ADCM
+   ,libin=WORK
+   ,libout=output
+   ,adsllib=ADB
+   ,addcomvar=Y
+   ,addseq=N
+   ,dropinfmt=Y
+   ,mapspecfile= &adam_spec.
+   ,maploc=&G_PROJECTPATH.&G_TOPLEVEL.\Documents\Specs\
+   ,debug=N);
+ 
+ %macro dod;
+ **Generate Value Level Metadata values for the ad<xx> dataset**;
+ % dod_vlm(        
+ 	type=ADAM,               
+ 	selmems=&DSETNAME,
+ 	excmems=,
+ 	specloc=&G_PROJECTPATH.&G_TOPLEVEL.\Documents\Specs\,
+ 	specname=&G_NICKNAME._ADaM_Spec.xlsm,
+ 	debug=N
+ 	);
+ 
+ **Generate Enhanced Controlled Terminology for the ad<xx> dataset**;
+ % dod_enhcd_ct(            
+ 	type=ADAM,               
+ 	selmems=&DSETNAME,
+ 	excmems=,
+ 	specloc=&G_PROJECTPATH.&G_TOPLEVEL.\Documents\Specs\,
+ 	specname=&G_NICKNAME._ADaM_Spec.xlsm,
+ 	map_ct_nm=,
+ 	map_ct_loc=,
+ 	debug=N
+ 	);
+%mend;

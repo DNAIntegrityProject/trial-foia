@@ -1,0 +1,370 @@
+%macro mu_lines_per_page
+ ( metadata_filepath=&get_tf_id._tf
+ , tlf_progname=&get_tf_id.
+ , globaltfs=1
+ , headerLines=
+ , nested_headerLines=     /* Number or a format name  */
+ , spanner_lines = 0 
+ , linesPerPage=&_default_page_length_lines
+ , in_data=
+ , escapechar=
+ , prcode_split = &_default_prcode_split
+ , rtfwidth=&_default_page_width_chars
+ , subgroup_var=&subgroup.
+ , debug=0
+ )  / store source des='V1.0.0.24' ;  
+
+%****************************************************************************************
+* GLOBALTFS makes the macro account for globaltfs. 
+*
+* HEADERLINES is the number of lines of column headers to be accounted for 
+*    outside the report body.  If left blank, this macro  will determine the maximum
+*    number of lines from the PACK_COL1 label and the macro variables used
+*    for the treatment column labels. Note that lines for spanning headers 
+*    are accounted for in spanner_lines
+*             
+*    
+* NESTED_HEADERLINES is either a user-provided number lines taken up by nested headers (e.g. Severity levels
+*   in columns above/below treatment columns) or derived by checking the number of PRCODE_SPLIT values in the
+*   format used to control the nested display column headers 
+* 
+* SPANNER_LINES is the number of lines used for spanning column headers  
+*
+* 
+* LINESPERPAGE is the number of lines that fit on the report including titles, footnotes, headers, and body.
+*
+* IN_DATA is the input data set which can be one or two levels, eg WORK.FINAL
+*
+* ESCAPECHAR is the ODS escape character, default value is the global macro variable _DEFAULT_ESCAPECHAR.
+*
+* DEBUG allows the macro derived datasets datasets to show up in to the work libray
+*
+* RTFWIDTH specifies how many characters that can fit onto one line of your rtf file. 
+%****************************************************************************************;
+
+  %PUT ------------------------------------------------- ;
+  %PUT INFO: (&SYSMACRONAME) ;
+  %PUT INFO: Version 1.0 ;
+  %PUT -START------------------------------------------- ;
+
+ %** Parameter checks ** ;
+ %global mu_lines_per_page_rc;
+ %let mu_lines_per_page_rc=0;
+
+ %* Check that METADATA_FILEPATH is populated ;
+ %mu_check_req_parameters( parameters_to_check = metadata_filepath tlf_progname linesperpage rtfwidth  )
+
+ %* Check that data set in METADATA_FILEPATH exists ;
+ %if %index(&metadata_filepath.,\)=0 and  %index(&metadata_filepath.,/)=0 %then %do ;
+        %mu_check_data_and_var_exist
+    (  data_to_check = &&metadata_filepath.
+         , abort_if_does_not_exist =No
+         , help = no ) 
+        %if &mu_check_data_and_var_exist_rc.=3  %then %do ;
+           %put %str(ALERT)_I: Data set specified in METADATA_FILEPATH parameter does not exist ;
+           %let mu_lines_per_page_rc=1 ; 
+   %end ;
+ %end ;
+
+ %* Check that data set in IN_DATA exists if parameter value is not missing ;
+ %if &in_data. ne %str() %then %do ; 
+        %mu_check_data_and_var_exist
+    (  data_to_check = &in_data
+         , abort_if_does_not_exist =No
+         , help = no ) 
+        %if &mu_check_data_and_var_exist_rc.=3  %then %do ;
+           %put %str(ALERT)_I: Data set specified in IN_DATA parameter does not exist ;
+           %let mu_lines_per_page_rc=1 ; 
+        %end ;
+  %end ;
+  
+  %* Check the LINESPERPAGE parameter is greater than or equal to 10 ;
+  %if %eval(&linesperpage. lt 10)=1 %then %do ;
+           %put %str(ALERT)_I: Value for LINESPERPAGE parameter is less than 10.  ;
+           %let mu_lines_per_page_rc=3 ;
+  %end ;
+  
+  %* -- If no value was entered for EscapeChar , a default value will be set here --; 
+  %md_default_check(mparm_name= EscapeChar 
+                 ,md_default_mvar = _default_escapechar 
+                 ,md_default_value  = %STR(^)
+                    );
+
+ %if &mu_lines_per_page_rc. gt 0 %then %goto MEXIT ;
+
+ %** End parameter checks ** ;
+
+
+
+ %* Global macro variables created by MU_LINES_PER_PAGE ;
+ %global  g_linesleft G_HEADERLINES ;
+
+
+ %if "&prcode_split." = "" %then %do;
+        %let prcode_split = $;
+ %end;
+ data _null_;
+        call symput('unquoted_prcode_split', compress("&prcode_split", "'"));
+ run ;
+
+ %* Set value of G_TRTCOLHEADLINES to 0 if it is not the global symbol table ;
+ proc sql noprint;
+  select  count( name ) 
+  into    :g_trtcolheadlines_exist
+  separated by ''
+  from    dictionary.macros
+  where   upcase(name) = 'G_TRTCOLHEADLINES'
+  ;
+  quit ;
+
+ %if &g_trtcolheadlines_exist. eq 0 %then %do;
+  %let g_trtcolheadlines = 0;
+ %end;
+ %PUT G_TRTCOLHEADLINES-&G_TRTCOLHEADLINES;
+
+ %* Set value of G_PACKVAR_DSLABEL to 0 if it is not the global symbol table ;
+ proc sql noprint;
+  select  count( name )
+  into    :g_packvar_dslabel_exist 
+  from dictionary.macros
+  where upcase(name) = 'G_PACKVAR_DSLABEL'
+  ;
+  quit;
+ %if &g_packvar_dslabel_exist eq 0 %then %do;
+   %let g_packvar_dslabel_lines = 0;
+ %end;
+ %else %do ;
+   data _null_ ;
+     label="&g_packvar_dslabel." ;
+     lines=countc(label,"&unquoted_prcode_split.")+1 ;
+     call symputx( 'g_packvar_dslabel_lines', lines ) ;
+     run ;
+ %end ;
+ 
+ %PUT G_PACKVAR_DSLABEL_EXIST-&g_packvar_dslabel_exist. ;
+
+ %if &spanner_lines. eq %str() %then %let spanner_lines = 0;
+
+        %*** helper macro for removing spaces at beginning and end of a value *** ;
+        %macro t(var) ;
+          %sysfunc( strip(&var.) )
+        %mend t ;         
+
+        %***** Calculates number of Header Lines if variable not specified ****;
+        %if &headerLines. eq %str() and "&unquoted_prcode_split." ne ""  and &in_data. ne %str() %then %do;
+                proc contents data=&in_data out=_contents noprint;
+                run;
+                
+                data _null_;
+                        set _contents end=last;
+                        where upcase(name) ne upcase("&subgroup_var.") and not missing(label);
+                        retain max 0 lines 1 ;
+                        lines = max(lines, count(label, "&unquoted_prcode_split")) ;  
+                        put label= lines=;
+                        retain max 0;
+                        max= max(&g_trtcolheadlines.,&g_packvar_dslabel_lines.,lines,max);
+                        if last then call symputx( "headerLines", max ) ;
+                run;
+        %end;
+        %else %if &headerLines. eq %str() %then %let headerLines = 0;
+        %put HEADERLINES-&headerLines. ;
+
+        %** Calculates number of Nested Header Lines if variable not specified **;
+        %let _re1=%sysfunc( prxparse(/\D/) ) ;
+        %let has_nondigits=%sysfunc( prxmatch(&_re1., &nested_headerLines.) ) ;
+        %if &nested_headerLines. ne %str() %then %do ;
+          %if &has_nondigits.=0 %then %let nested_headerlines=&nested_headerlines. ; %* use numeric value provided ;
+            %else %do ;
+                        proc format cntlout=__format__  ;
+                          select %sysfunc( compress(&nested_headerLines.,.) ) ;
+                        run ;
+            %mu_nobs( in_data=__format__ )
+                        %if &__format___nobs.=0 %then %do ;
+                                %put %str(ALERT)_I: Format specified in NESTED_HEADERLINES does not exist ;
+                                %let mu_lines_per_page_rc=2 ;
+                                %goto MEXIT ;
+                        %end ;
+
+                        proc sql noprint ;
+                          select  max( countc(label,"&unquoted_prcode_split.")+1 ) 
+                          into   :nested_headerlines
+                          separated by  ''
+                          from   __format__
+                          ;
+                          drop table __format__ ;
+                          quit ;
+                %end;
+           %end ;
+           %else %if &nested_headerLines. eq %str() %then %let nested_headerlines=0;
+         %put NESTED_HEADERLINES-&nested_headerLines. ;
+
+
+   %* Check for any subgroup titles not in the .tf file or data set ;
+         proc sql noprint;
+          select  count( name )
+          into    :title_count_exist 
+          from dictionary.macros
+          where upcase(name) = 'TITLE_COUNT'
+          ;
+          quit;
+         %if &title_count_exist. ge 1 %then %do;
+         proc sql ;
+                    create table __subgroup_title__ as
+                        select  *
+                        from    dictionary.titles
+                        where   number > &title_count.
+                              & type='T'
+                        ;
+                        quit ;
+                  %if &sqlobs.=0 %then %let subgroup_title_lines=0 ;
+                  %else %do ;
+                     data _null_ ;
+                          do n=0 by 0 until( eof ) ;
+                            set __subgroup_title__ end=eof ;
+                                length take $200 ;
+                            take=tranwrd( text, "%str(&escapechar)n",'bb'x);
+                        count_carriage_returns = length( %t( take ) ) - length( compress( %t( take ), 'bb'x ) ) ;
+                                n++1+count_carriage_returns ;
+                          end ;
+                          call symputx( 'subgroup_title_lines', n ) ;
+                          stop ;
+                          run ;
+                   %end ;         
+         %end;
+
+
+        %**** Calculates Number of Lines To Fit Per Page ***;
+
+        data __TFREAD__;
+                
+                %** checks if metadata is a file path to TF_Extract or Dataset of titles and footnotes **;
+                %if %index(&metadata_filepath.,\) | %index(&metadata_filepath.,/) %then %do;
+                    infile "&metadata_filepath." delimiter='bb'x missover dsd lrecl=32767 end=eof  ;
+                    attrib 
+                         _progid        length=$1000       label='Name of the program'
+                     _torf_seq      length=$4          label='(T)Title/(F)footnote and Sequence Number'
+                     _user_modified length=$1000       label="User Modified Y/N"
+                     _blank         length=$1          label='Blank(dropped) for visual reference only'
+                     _just1         length=$3          label='Justification for first element'
+                     _tftext1       length=$1000           label='Text for first element'  informat=$1000.
+                     _just2         length=$4          label='Justification for second element'
+                     _tftext2       length=$1000           label='Text for second element' informat=$1000.
+                     _just3         length=$4          label='Justification for third element'
+                     _tftext3       length=$1000       label='Text for third element'  informat=$1000.
+                     ;
+                    input _progid $ _torf_seq $ _user_modified $ _blank $ _just1 $_tftext1 $ _just2 $ _tftext2 $ _just3 $_tftext3 $;
+
+                %end;
+                %else %do;
+                        attrib  _progid        length=$1000       label='Name of the program';
+                        set %sysfunc(compress(&metadata_filepath.));
+                        _progid="&tlf_progname";
+                %end;
+
+                %** end check ***;
+                        length take tftext_all  $2000 ;
+
+            * String __TFTEXT components together ;
+                        tftext_all=catx( '-', of _tftext: ) ;
+                        if ~missing( _tftext3 ) then sections=3 ;
+               else if ~missing( _tftext2 ) then sections=2 ;
+               else sections=1 ; 
+
+                        * Remove markup command for top footnote border w/ optional hanging indent ;
+                          re1=prxparse( 's@(.|&escapechar\.)R.RTF..brdrt.brdrs.brdrw\d+(.li\d+.fi-\d+)?@@io') ;
+                          tftext_all=prxchange( re1, -1, tftext_all ) ;
+                          tf_text=prxchange( re1, -1, tf_text ) ;
+                        * Remove markup command for hanging indent ;
+                          re2=prxparse( 's@(.|&escapechar\.)R.RTF..li\d+.fi-\d+@@io') ;
+                          tftext_all =prxchange( re2, -1, tftext_all ) ;
+                          tf_text=prxchange( re2, -1, tf_text ) ;
+
+                        * Remove markup command for hanging indent with leading "\."  from GET_TF;
+                          re3=prxparse( 's@\\\.\\li\d+.fi-\d+@@io') ;
+                          tftext_all =prxchange( re3, -1, tftext_all ) ;
+                          tf_text=prxchange( re3, -1, tf_text ) ;
+
+                        * Replace markup commands from titles and footnotes that have been combined b.c there were more than  ;
+            * 10 statements with ODS linebreak commands ;
+                          re4=prxparse( "s@(.|%nrstr(&escapechar)\.)R.RTF..par(.li\d+.fi-?\d+)?@%nrstr(&escapechar).n@io") ;
+                          tf_text=prxchange( re4, -1, tf_text ) ;
+                          if 2*length(tftext_all)<length(tf_text) then tftext_all=tf_text ;
+
+                        char1=length(tftext_all) ;
+
+                        take=tranwrd(tftext_all,"%str(&escapechar)n",'bb'x) ;
+                        take=tranwrd(take,"\line",'bb'x) ;
+						
+                        if index(take, "\par") and length(substr(take,index(take,"\par"),3)) gt 0 then do;
+                          if length(compress(substr(take,index(take,"\par"),3), "A")) ne 0 and
+
+                          index(compress(substr(take,index(take,"\par"),3), "A"), '\/') eq 0 then take=tranwrd(take, "\par", 'bb'x ); 
+                        
+                        end; * Remaining line breaks from using BLANK_FIRST_FOOTNOTE=YES ; 
+
+                        take=tranwrd(take,'escapechar.n','bb'x) ; %* make another pass ;
+                    count_carriage_returns = length( %t( take ) ) - length( compress( %t( take ), 'bb'x ) ) ;
+
+                        _space=0 ;
+                        if count_carriage_returns ne 0 then do ;
+                                do __i__=1 to count_carriage_returns+1;
+                                        _space=_space + int(length(scan(take,__i__,'bb'x))/int(&rtfwidth./sections) ) + 1 ;     
+                                end ;
+                        end ;
+                        else do ;
+                                   _space=int(char1/&rtfwidth.)+1 ;
+                        end ;
+
+                        if index(upcase(compress(tftext_all)),'PLACEHOLDER') and index(_progid,'GLOBALTFS') then delete ;
+
+                        if _n_=1 then lines=0 ;
+                        if _progid="&tlf_progname" then do ;
+                                lines=lines+_space ;
+                        end ;
+                        if index(_progid,"GLOBALTFS&globaltfs") and &globaltfs ne 0 then do;
+                                lines=lines+_space ;
+                        end ;
+
+                        retain lines ;
+                        
+                        if _progid="&tlf_progname"  
+                         %if &globaltfs ne 0 %then %do ;
+                                 or  index(_progid,"GLOBALTFS&globaltfs");
+                         %end;
+                        ;
+                        
+                        call symputx( 'lines', lines ) ;
+                        call symputx( 'g_linesLeft', &linesPerPage. - &headerLines. - &subgroup_title_lines. 
+                                                                                 - lines - &spanner_lines. - &nested_headerlines. ) ;
+        run ;
+        
+        %global g_headerlines;
+        %let g_headerlines = %eval(&headerLines + &spanner_lines);
+
+         %put G_LINESLEFT(&g_linesLeft.)=linesPerPage(&linesPerPage.) - Titles & Footnotes(&lines.) - Subgroup Titles(&subgroup_title_lines.) 
+- HeaderLines(&headerLines.) - NESTED_HEADERLINES(&nested_headerlines.) - Spanner Lines(&spanner_lines.)  ;
+
+
+   %if %eval(&g_linesleft. lt 1 )=1 %then %do ;
+           %put %str(ALERT)_P: Calculated G_LINESLEFT macro value is less than 1  ;
+           %let mu_lines_per_page_rc=4 ;
+           %goto MEXIT ;
+   %end ;
+        
+
+        
+  %* Clean-up ;
+  %if %substr(&debug,1,1)=0 or %upcase(%substr(&debug,1,1))=N %then %do ;
+  proc sql ;
+    drop table __tfread__, __subgroup_title__ ;
+        quit ;
+  %end ;
+
+
+  %put %str(W)ARNING- Leaving &sysmacroname. macro.;
+
+  %return ;
+   
+  %MEXIT: %put %str(A)LERT_P: &sysmacroname. macro was terminated prematurely b/c one or more parameter checks failed ;
+
+%mend mu_lines_per_page;

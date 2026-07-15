@@ -1,0 +1,219 @@
+*************************************************************************************************;
+* 
+*           CLIENT:  ModernaTX, Inc.
+*         PROTOCOL:  mRNA-1273-P301
+*
+*          PURPOSE: Create analysis dataset adcm
+*      
+*      INPUT FILES: SDTM domains
+*     OUTPUT FILES: ADCM.sas7bdat
+*
+*      USAGE NOTES: 
+*      
+*************************************************************************************************;
+*  Copyright 2020 Pharmaceutical Product Development, Inc.
+*  All Rights Reserved. 
+*************************************************************************************************;
+
+options noquotelenmax;
+%include "madam.sas";
+
+**Assign global macro variable DSETNAME to reflect the name of the final ADaM dataset**;
+%global DSETNAME;
+%let dsetname = adcm;
+%let adslvar=tr01sdt tr01sdtm TRTSDT tr01edt tr01edtm tr02sdt tr02sdtm dose2dt dos2dtm 
+			 oldos2dt oldo2dtm eosdt dthdt TR02EDT AP02SSDT CUTOFFDT;
+
+**Merge supplemental data onto parent domain**;
+%revsupp(libin=trans,libout=work,ds=cm,supp=suppcm,outds=cm_all);
+
+data adsl;
+	set adb.adsl;
+	keep USUBJID subjid &adslvar.;
+run;
+
+data cm_adsl;
+	merge cm_all(in=a) adsl(in=b keep=USUBJID subjid &adslvar.);
+	by usubjid subjid;
+	if a and b;
+
+	CMTRT = strip(compbl(tranwrd(CMTRT,'0920'x,'2020'x)));
+	CMINDC = strip(compbl(tranwrd(CMINDC,'0920'x,'2020'x)));
+run;
+
+data pre_adcm;
+	length cmuothsp cmfothsp cmrothsp ATCLEV1T ATCLEV2T ATCLEV3T ATCLEV4T CMENRF $200 cmsolfl astdtf aendtf ontrtfl fupfl prefl CMMOI1FL cmmoi3fl $1;
+	set cm_adsl(rename=(cmuothsp=_cmuothsp cmfothsp=_cmfothsp cmrothsp=_cmrothsp ATCLEV1T=_ATCLEV1T  ATCLEV3T=_ATCLEV3T ATCLEV4T=_ATCLEV4T));
+	
+	**supp variables;
+	cmuothsp=_cmuothsp;
+	cmrothsp=_cmrothsp;
+	cmfothsp=_cmfothsp;
+	cmsolfl = cmsol;
+	ATCLEV1T=_ATCLEV1T;
+	ATCLEV2T=cmclas;
+	ATCLEV3T=_ATCLEV3T;
+	ATCLEV4T=_ATCLEV4T;
+	if cmplx="Yes" then cmmoi1fl = 'Y';
+	
+****derive astdt aendt;
+		if TRTSDT>. then __rfxstdtc = put(TRTSDT,yymmdd10.);
+
+	* CM End Date Time;
+	cutoffdt_c = put(cutoffdt,yymmdd10.);
+	%imp_atdt(sten=en,vardtc=cmendtc,trtsdtc=__rfxstdtc,dendtc=cutoffdt_c,oriendtc=cutoffdt_c);
+	%ISO2SAS(isodate=imp_cmendtc, datec=_aendtc, daten=AENDT, timec=_aentm);
+	if index(_aentm,'--') then _aentm = '';
+	if ^missing(AENDT) then cm_aendt = put(AENDT,yymmdd10.);
+
+	* CM Start Date Time;
+	%imp_atdt(sten=st,vardtc=cmstdtc,trtsdtc=__rfxstdtc,dendtc=cm_aendt,oriendtc=cmendtc);
+	%ISO2SAS(isodate=imp_cmstdtc, datec=_cmstdtc, daten=ASTDT, timec=_asttm);
+	if index(_asttm,'--') then _asttm='';
+
+	if imp_ori_st___rfxstdtc='Yes' then do;
+		ASTTM = timepart(tr01sdtm);
+		if input(_asttm,time5.)^=asttm then ASTTMF = 'H';
+	end;
+
+	if ^missing(_asttm) and ^missing(ASTDT) then ASTDTM = input(compress(put(ASTDT,date9.)||':'||_asttm),datetime20.);
+	if ^missing(_asttm) then ASTTM = input(_asttm,time5.);
+
+	* rederived End Date;
+		if EOSDT>. then _eosdt = EOSDT; else _eosdt = "&SYSDATE9."d + 1;
+		if DTHDT>. then _dthdt = DTHDT; else _dthdt = "&SYSDATE9."d + 1;
+		if AENDT>. then _aendt = AENDT; else _aendt = "&SYSDATE9."d + 1;
+		if AENDTF^='' then re_AENDT = min(_eosdt,_dthdt,_aendt,cutoffdt);
+		if re_AENDT>"&SYSDATE9."d then re_AENDT = .;
+		if AENDTF='D' and month(AENDT)^=month(re_AENDT) and year(AENDT)=year(re_AENDT) then do;
+			*AENDTF = 'M'; AENDT = re_AENDT;
+		end;
+		else if AENDTF^='' and year(AENDT)^=year(re_AENDT) then do;
+			*AENDTF = 'Y'; AENDT = re_AENDT;
+		end;
+		else if re_AENDT>. then AENDT = re_AENDT;
+
+	if ^missing(_aentm) and ^missing(AENDT) then AENDTM = input(compress(put(AENDT,date9.)||':'||_aentm),datetime20.);
+	if ^missing(_aentm) then AENTM = input(_aentm,time5.);
+
+	if ASTDT>AENDT>. and ASTDTF^='' then do;
+		*if ASTDTF='D' and month(ASTDT)^=month(AENDT) and year(ASTDT)=year(AENDT) then ASTDTF = 'M'; 
+		*else if ASTDTF^='' and year(ASTDT)^=year(AENDT) then ASTDTF = 'Y';
+
+		ASTDT = AENDT;
+		if ^missing(ASTTM) then ASTTM = AENTM;
+		if ^missing(ASTDTM) then ASTDTM = AENDTM;
+	end;
+
+
+*** ADY;
+	IF ASTDT >= TR01SDT>. THEN ASTDY=ASTDT - TR01SDT + 1;
+	ELSE IF   .<ASTDT < TR01SDT THEN ASTDY=ASTDT - TR01SDT;
+	IF AENDT >= TR01SDT>. THEN AENDY=AENDT - TR01SDT + 1;
+	ELSE IF   .<AENDT < TR01SDT THEN AENDY=AENDT - TR01SDT;
+
+*** most recent dose reference & day relative start day;
+	_ADTM=.;
+	%xxdoserf(xx=CM,adt=ASTDT,adtm=_ADTM,rddy=RDSTDY,tim=); 
+		MDOSREF = out_CMDOSERF;
+		MRDSTDY = CMRDSTDY;
+		CMDOSERF = ''; out_CMDOSERF = ''; 
+		if MDOSREF^='' and .<aendt<tr01sdt then do;
+			_war = 'Put Aler'||'t_R: aendt<tr01sdt.';
+			put _war subjid= AENDT= TR01SDT=;
+			*call missing(MDOSREF,out_CMDOSERF,MRDSTDY,CMDOSERF,CMRDSTDY);
+		end;
+		else if MDOSREF='Vaccination 2' and .<tr01sdt<aendt<dose2dt then do;
+			_war = 'Put Aler'||'t_R: when MDOSREF=Vaccination 2 and tr01sdt<aendt<dose2dt.';
+			put _war subjid= TR01SDT= AENDT= DOSE2DT=;
+			*if ^missing(astdt) then MRDSTDY = astdt - tr01sdt + 1;
+			*MDOSREF='Vaccination 1';
+		end;
+
+
+*** Period;
+	if .<AP02SSDT<=ASTDT then APERIOD = 2;
+	else APERIOD = 1;
+
+*** pre-treatment flag;
+	if .<astdt<tr01sdt or missing(astdt) then prefl="Y";
+
+*** on treatment record flag;
+	if  APERIOD=1 and ASTDT<=TR01EDT+27 and ASTDT>. and TR01EDT>. and (AENDT>=TR01SDT>. or AENDT=.) then ontrtfl = "Y";
+	else if ASTDT=. and (AENDT>=TR01SDT>. or AENDT=.) then ontrtfl = "Y";
+	else if  APERIOD=2 and ASTDT<=TR02EDT+27 and ASTDT>. and TR02EDT>. and (AENDT>=TR02SDT>. or AENDT=.) then ontrtfl = "Y";
+	else if ASTDT=. and (AENDT>=TR02SDT>. or AENDT=.) then ontrtfl = "Y";
+
+*** follow up flag;
+	if APERIOD=1 and ((AENDT>TR01EDT+27 and AENDT>. and TR01EDT>.) or AENDT=.) then fupfl="Y";
+	else if APERIOD=2 and ((AENDT>TR02EDT+27 and AENDT>. and TR02EDT>.) or AENDT=.) then fupfl="Y";
+
+*** cmmoi3fl;
+	if ATCLEV4T='INFLUENZA VACCINES' then cmmoi3fl = "Y";
+	
+	CMENRF = cmenrtpt;
+
+	if ^missing(CMPROTCD) then DRUGCODE = substr(compress(CMPROTCD),1,8);
+
+	format astdt aendt _eosdt _dthdt _aendt re_AENDT date9.;
+run;
+
+*** cmmoi2fl;
+proc sort data=pre_adcm; by DRUGCODE; run;
+
+data pain_drugcode;
+	set import.pain_drugcode(rename=(DRUGCODE=_DRUGCODE));
+	if ^missing(_DRUGCODE) then DRUGCODE = substr(compress(_DRUGCODE),1,8);
+run;
+proc sort tagsort data=pain_drugcode nodupkey; by DRUGCODE; run;
+
+data adcm;
+	merge pre_adcm(in=a) pain_drugcode(in=b keep=DRUGCODE); 
+	by DRUGCODE;
+	if a;
+
+	if b then CMMOI2FL = 'Y'; else CMMOI2FL = '';
+
+	ADT=ASTDT;
+	ADTM=ASTDTM;
+run;
+
+
+**Generate final dataset by updating certain attributes. Optionally merge common variables & create sequence variable as needed**;
+%trta(dsname=&DSETNAME);
+
+%adam_dataset_update(
+	ds=&DSETNAME,
+	libin=work,
+	libout=output,
+	adsllib=adb,
+	addcomvar=Y,
+	addseq=,
+	dropinfmt=Y,
+	mapspecfile=&ADAM_SPEC,
+	maploc=&ADAM_SPEC_LOC,
+	debug=N
+	);
+	
+	
+**Generate Value Level Metadata values for the ad<xx> dataset**;
+%* dod_vlm(        
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&ADAM_SPEC_LOC,
+	specname=&ADAM_SPEC,
+	debug=N
+	);
+
+**Generate Enhanced Controlled Terminology for the ad<xx> dataset**;
+%* dod_enhcd_ct(            
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&ADAM_SPEC_LOC,
+	specname=&ADAM_SPEC,
+	map_ct_nm=,
+	map_ct_loc=,
+	debug=N
+	);

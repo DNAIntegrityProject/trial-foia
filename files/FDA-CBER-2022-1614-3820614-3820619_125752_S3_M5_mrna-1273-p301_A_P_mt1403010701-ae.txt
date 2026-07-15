@@ -1,0 +1,242 @@
+*************************************************************************************************;
+*           CLIENT: ModernaTX, Inc.
+*         PROTOCOL: mRNA-1273-P301
+*          PURPOSE: Create common code - Table Summary of Unsolicited TEAE      
+*      INPUT FILES: ADaM datasets
+*     OUTPUT FILES: *.rtf
+*      USAGE NOTES: 
+*************************************************************************************************;
+*  Copyright 2020 Pharmaceutical Product Development, Inc.
+*  All Rights Reserved.
+*************************************************************************************************;
+
+%Macro custom_bign;
+%if %symexist(bign_whr) ne 0 %then %do;
+	%global total_col_display _default_col1_width_pcnt;
+    %let total_col_display = NONE;
+    %let _default_col1_width_pcnt=45;
+	
+	%ma_bign
+	( in_data = adsl_b
+	, in_where = &popfl.='Y' and covbln^=9 &bign_whr.
+	, subgroup = &cohortn.
+	);
+%end;
+%Mend custom_bign;
+%custom_bign
+
+**In_dataset;
+data subset;
+	set adb.adae;
+	where &subwhere.;
+	%process_covbln(spanYN=&spantitfl.,spaner=&subgroup.);
+run;
+
+%blankprogram;
+
+%LET FT = %STR(Fat)al;
+
+*** create dataset for execute parameter;
+data sections;
+	length condition text section order out header headin $200;
+	condition = "^missing(aeterm)  ";text = "All"; section = "100";order = "10";out = "row1";header = "Unsolicited TEAEs Regardless of Relationship to Study Vaccination";headin= "0";output;
+	condition = "^missing(aeterm) and aeser='Y'";text = "Serious";section = "100";order = "20";out ="row2";header ="";headin="";output;
+	condition = "^missing(aeterm) and AEMAFL='Y'";text = "Medically-Attended";section = "100";order = "40";out ="row4";header ="";headin="";output;
+	condition = "^missing(aeterm) and index(AEACN,'WITHDRAWN')>0";text = "Leading to Discontinuation from Study Vaccine";section = "100";order = "50";out ="row5";header ="";headin="";output;
+	condition = "^missing(aeterm) and AEDISFL='Y'";text = "Leading to Discontinuation from Participation in the Study";section = "100";order = "60";out ="row6";header ="";headin="";output;
+	condition = "^missing(aeterm) and aesev='SEVERE' ";text = "Severe";section = "100";order = "70";out ="row7";header ="";headin="";output;
+
+	condition = "areln=2 ";text = "All"; section = "200";order = "80";out = "row8";header = "Unsolicited TEAEs Related to Study Vaccination";headin= "0";output;
+	condition = "areln=2 and aeser='Y'";text = "Serious";section = "200";order = "90";out ="row9";header ="";headin="";output;
+	condition = "areln=2 and AEMAFL='Y'";text = "Medically-Attended";section = "200";order = "110";out ="row11";header ="";headin="";output;
+	condition = "areln=2 and index(AEACN,'WITHDRAWN')>0";text = "Leading to Discontinuation from Study Vaccine";section = "200";order = "120";out ="row12";header ="";headin="";output;
+	condition = "areln=2 and AEDISFL='Y'";text = "Leading to Discontinuation from Participation in the Study";section = "200";order = "130";out ="row13";header ="";headin="";output;
+	condition = "areln=2 and aesev='SEVERE' ";text = "Severe";section = "200";order = "140";out ="row14";header ="";headin="";output;	
+	
+run;
+
+*** use call execute to create each row summary;
+data _null_ ;
+  set sections  ;
+  call execute( '%nrstr(%ma_count_one_row(in_data=subset,in_where=' || strip(condition) 
+	|| ',subgroup=&cohortn.,byvars_preloadfmt=&subgroup_fmt.,text_for_column1=' || strip(text) 
+    || ',indent_column1=2,_section_=' || strip(section) || ',_order1_=' || strip(order)|| ',header='||strip(header)|| ',header_indent='||strip(headin)
+	||',get_subj_count= Yes , count_subj_var= N,out_data='
+	|| strip(out) ||'))' );
+run;
+
+ %ma_count_one_row
+ (  in_data             = subset
+  , in_where            = ^missing(aeterm) and aeout='FA'||'TAL' 
+  , subgroup			= &cohortn.
+  , text_for_column1    = &FT.
+  , indent_column1      = 2
+  , _section_           = 100 
+  , _order1_            = 30
+  , get_subj_count      = Yes
+  , count_subj_var      = N
+  , out_data            = ROW3 
+ );
+ %ma_count_one_row
+ (  in_data             = subset
+  , in_where            = areln=2 and aeout='FA'||'TAL' 
+  , subgroup			= &cohortn.
+  , text_for_column1    = &FT.
+  , indent_column1      = 2
+  , _section_           = 200 
+  , _order1_            = 100
+  , get_subj_count      = Yes
+  , count_subj_var      = N
+  , out_data            = ROW10 
+ );
+
+*** setall row together;
+data setall;
+ 	length col1 $200;
+ 	set row1-row14 ;
+
+	%if &total_col_display.=NONE %then %do;
+	%update_section_;
+	%end;
+run;
+
+*** Derive percentages;
+%ma_n_pcnt
+ (  in_data = setall
+  , subgroup = &cohortn.
+  , in_numerator = n
+  , in_denom_var = denom
+  , no_pcnt_if =      
+  , trigger_pcnt_sign = &_default_trigger_pcnt_sign.
+  , trigger_tight_paren = &_default_trigger_tight_paren.
+  , trigger_n_space_pcnt = &_default_trigger_n_space_pcnt.
+  , blank_for_zero_denom = &_default_blank_for_zero_denom. 
+  , out_data = N_PCNT
+  , out_pcnt = pcnt
+  , out_display_var = n_pcnt
+ );
+
+*** Transpose treatments to columns;
+%macro update_transpose;
+%if &total_col_display.=NONE %then %do;
+	%mu_transpose
+	 (  in_data = N_PCNT
+	  , transpose_by = &cohortn. _section_ _skipvar_ _order1_ _indent_ col1  
+	  , transpose_vars = n_pcnt
+	  , transpose_id = &_default_trtvar.
+	  , out_data = TRANSP_PCNT
+	 );
+%end;
+%else %do;
+	%if %symexist(g_outtype)=0 %then %do;
+	%wrap_npcnt;
+	%end;
+
+	%mu_transpose
+	 (  in_data = N_PCNT
+	  , transpose_by = _section_ _skipvar_ _order1_ _indent_ col1
+	  , transpose_vars = n_pcnt
+	  , transpose_id = &cohortn. &_default_trtvar.
+	  , out_data = TRANSP_PCNT
+	 );
+%end;
+%mend update_transpose;
+%update_transpose;
+
+%if %symexist(g_outtype)=0 %then %do;
+ *** pack column 1;
+%mr_pack
+  (  in_data=TRANSP_PCNT
+   , out_data=MR_PACK
+   , var=col1
+   , packvar_label =
+   , page_width_chars = &_default_page_width_chars.
+   , col1_width_pcnt = &_default_col1_width_pcnt.
+   , indent=_indent_
+  );
+
+ *** Get title & footnote;
+%get_tf
+ (  tlf_progname = &get_tf_id. 
+  , escapechar = &_default_escapechar.
+ );
+
+%subtitle(subt=&subtitfl.);
+
+%mu_lines_per_page 
+ (  in_data = MR_PACK
+  , metadata_filepath = &g_deliverableid._tf
+  , tlf_progname = &g_deliverableid.
+  , globaltfs = 1
+  , headerLines = 
+  , nested_headerLines =   
+  , spanner_lines  =  1 
+  , linesPerPage = &_default_page_length_lines.
+  , escapechar =  &_default_escapechar.
+  , prcode_split  =  &_default_prcode_split.
+  , rtfwidth = &_default_page_width_chars.
+  , subgroup_var = &cohortn.
+ );
+
+%mr_pagebreak_table
+ (  vartx               = pack_col1 
+  , lines_left_on_page  = &g_linesleft.
+  , in_data             = MR_PACK
+  , out_data            = pagebreak
+  , escapechar          = &_default_escapechar.
+  , subgrp				= /*&cohortn.*/
+  , section             = _section_
+  , section_protection  = y
+  , lineskip            = 1 
+ );
+%end;
+
+** align the columns;
+* deciaml align the categorical results ;
+%macro update_align;
+%mu_align
+( in_data      = pagebreak
+, out_data     = FINAL
+, colprefix    = n_pcnt_
+%if &total_col_display.^=NONE %then %do;
+, align        = C
+%end; 
+%if &total_col_display.=NONE %then %do;
+, align        = D
+%if %symexist(left_spacn)=0 %then %do;
+, left_spacing = 1000
+%end;
+
+%if %symexist(left_spacn) ne 0 %then %do;
+, left_spacing = &left_spacn.
+%end;
+%end;
+);
+%mend update_align;
+
+%if %symexist(g_outtype)=0 %then %do;
+%update_align;
+%end;
+
+
+%macro create_final;
+%if %symexist(g_outtype)=0 %then %do;
+
+	%if %symexist(subtitle_fmt) ne 0 and &cohortn.^= %then %do;
+	data final;
+		set final;
+		format covbln &subtitle_fmt.;
+	run;
+	%end;
+
+	%if &total_col_display.^=NONE and subtitfl^=Y %then %do;
+	data final;
+		set final;
+		if _skipvar_=100 then pagenum = 1;
+		else if _skipvar_=200 then pagenum = 2;
+	run;
+	%end;
+
+%end;
+%mend create_final;
+%create_final;

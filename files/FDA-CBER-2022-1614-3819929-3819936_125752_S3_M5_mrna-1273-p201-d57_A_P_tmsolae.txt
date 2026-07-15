@@ -1,0 +1,367 @@
+************************************************************************
+*        CLIENT:  ModernaTX, Inc.
+*      PROTOCOL:  mRNA-1273-P201
+*       PURPOSE:  Create Macro for Table 14.3.1.1.1 - .3
+
+*
+*   INPUT FILES:   ADSL, ADAAAE
+*  OUTPUT FILES:   
+*   USAGE NOTES:  
+************************************************************************* 
+*  Copyright 2020 PPD
+*  All Rights Reserved. 
+*************************************************************************;
+
+%include 'mclopper.sas';
+%include "mmwintext.sas";
+%let _default_debug = Y; 
+%let _default_help = Y; 
+%let _default_in_data = ADARSUM;
+%let _default_trtvar = TRT01AN; 
+%let subgroup =;
+%global keep;
+
+%if &G_OUTTYPE =INTEXT %then %do;  
+  	%let _default_col1_width_pcnt = 22;
+  %end;
+  %else %do;   	
+  	%let _default_col1_width_pcnt = 20 ; 
+%end;
+
+proc format;
+    value tox (notsorted multilabel) 
+            1,2,3,4 = 'Any'
+            1 = 'Grade 1'
+            2 = 'Grade 2'
+            3 = 'Grade 3'
+            4 = 'Grade 4';
+    value toxa (notsorted multilabel) 
+            .,1,2,3,4 = 'Any Solicited Adverse Reactions'
+            1 = 'Grade 1'
+            2 = 'Grade 2'
+            3 = 'Grade 3'
+            4 = 'Grade 4';
+    value toxb (notsorted multilabel) 
+            1,2,3 = 'Any Solicited Local Adverse Reactions'
+            1 = 'Grade 1'
+            2 = 'Grade 2'
+            3 = 'Grade 3'
+            4 = 'Grade 4';
+    value toxc (notsorted multilabel) 
+            .,1,2,3,4 = 'Any Solicited Systemic Adverse Reactions'
+            1 = 'Grade 1'
+            2 = 'Grade 2'
+            3 = 'Grade 3'
+            4 = 'Grade 4';
+run;
+
+
+%Header(Type = A);
+%process_indata(out_data=&_default_in_data, in_data=adb.&_default_in_data, trtvar = trt01an, type=table);
+
+data &_default_in_data;
+    set &_default_in_data;
+    where &_default_in_where. and paramcd not in ('WRASH' 'LYMOCCYN');
+run;
+
+** BIGN;
+
+%ma_bign (in_data = &_default_bign_in_data,
+          in_where = &_default_bign_in_where,
+          subgroup = );
+
+
+%macro one_row(where, col1, header, header_indent, sec, order1, indent);
+    %ma_count_one_row(in_data = &_default_in_data.,
+                      in_where = &where.,
+                      text_for_column1 = &COL1.,
+                      _section_ = &sec.,
+                      _order1_ = &order1.,
+                      indent_column1 =&indent.,
+                      header = &header.,
+                      header_indent = &header_indent.,
+                      out_data = sec&sec._&order1.);
+%mend;
+
+%macro cat (where, catvar, fmt, header, sec, order1, indent);
+    %ma_count_categorical(in_data = &_default_in_data.,
+                          in_where = &where.,
+                          catvar = &catvar.,
+                          catvar_preloadfmt = &fmt.,
+                          catvar_sort_order = n,
+                          catvar_sort_asc_or_desc = a,
+                          catvar_first_or_last = last,
+                          indent_column1 = &indent.,
+                          _section_ = &sec.,
+                          _order1_start = &order1.,
+                          header = &header.,
+                          header_indent = 0,
+                          out_data = sec&sec.);
+%mend;
+*any;
+%one_row(%str(), %str(Solicited Adverse Reactions - N1), , , 10, 0, 0);
+%cat(%str((paramcd ne 'RASHOCYN' and atoxgrn > 0) or (paramcd eq 'RASHOCYN' and avalc = 'Y')), atoxgrn, toxa, , 10, 2, 4);
+
+*Local;
+%one_row(%str(PARAMCD = 'WSLAR'), %str(Solicited Local Adverse Reactions - N1), , , 20, 0, 0);
+%cat(%str(PARAMCD = 'WSLAR' and  atoxgrn > 0), atoxgrn, toxb, , 20, 2, 4);
+
+%one_row(%str( paramcd = 'WPAIN'), %str(Pain - N1), , , 21, 0, 2);
+%cat(%str( atoxgrn > 0 and PARAMCD = 'WPAIN'), atoxgrn, tox, , 21, 2, 4);
+
+%one_row(%str( paramcd = 'WERYTH'), %str(Erythema (Redness) - N1), , , 22, 0, 2);
+%cat(%str( atoxgrn > 0 and PARAMCD = 'WERYTH'), atoxgrn, tox, , 22, 2, 4);
+
+%one_row(%str( paramcd = 'WSWELL'), %str(Swelling (Hardness)- N1), , , 23, 0, 2);
+%cat(%str( atoxgrn > 0 and PARAMCD = 'WSWELL'), atoxgrn, tox, , 23, 2, 4);
+
+%one_row(%str( paramcd = 'WLYMPH'), %str(Lymphadenopathy - N1 [1]), , , 24, 0, 2);
+%cat(%str( atoxgrn > 0 and PARAMCD = 'WLYMPH'), atoxgrn, tox, , 24, 2, 4);
+
+
+*systemic;
+
+%one_row(%str(PARAMCD = 'WSSAR' or paramcd = 'RASHOCYN'), %str(Solicited Systemic Adverse Reactions - N1), , , 30, 0, 0);
+%cat(%str( ((PARAMCD = 'WSSAR' and atoxgrn > 0) or (paramcd eq 'RASHOCYN' and avalc = 'Y'))), atoxgrn, toxc, , 30, 2, 4);
+
+%one_row(%str( paramcd = 'WFEVER'), %str(Fever - N1), , , 31, 0, 2);
+%cat(%str( atoxgrn > 0 and PARAMCD = 'WFEVER'), atoxgrn, tox, , 31, 2, 4);
+
+%one_row(%str( paramcd = 'WHEAD'), %str(Headache - N1), , , 32, 0, 2);
+%cat(%str( atoxgrn > 0 and PARAMCD = 'WHEAD'), atoxgrn, tox, , 32, 2, 4);
+
+%one_row(%str( paramcd = 'WFATIGUE'), %str(Fatigue - N1), , , 33, 0, 2);
+%cat(%str( atoxgrn > 0 and PARAMCD = 'WFATIGUE'), atoxgrn, tox, , 33, 2, 4);
+
+%one_row(%str( paramcd = 'WMYALGIA'), %str(Myalgia - N1), , , 34, 0, 2);
+%cat(%str( atoxgrn > 0 and PARAMCD = 'WMYALGIA'), atoxgrn, tox, , 34, 2, 4);
+
+%one_row(%str( paramcd = 'WARTHR'), %str(Arthralgia - N1), , , 35, 0, 2);
+%cat(%str( atoxgrn > 0 and PARAMCD = 'WARTHR'), atoxgrn, tox, , 35, 2, 4);
+
+%one_row(%str( paramcd = 'WNAUSEA'), %str(Nausea/Vomiting - N1), , , 36, 0, 2);
+%cat(%str( atoxgrn > 0 and PARAMCD = 'WNAUSEA'), atoxgrn, tox, , 36, 2, 4);
+
+%one_row(%str( paramcd = 'WCHILLS'), %str(Chills - N1), , , 37, 0, 2);
+%cat(%str( atoxgrn > 0 and PARAMCD = 'WCHILLS'), atoxgrn, tox, , 37, 2, 4);
+
+%one_row(%str( paramcd = 'RASHOCYN'), %str(Rash - N1), , , 38, 0, 2);
+%one_row(%str( paramcd = 'RASHOCYN' and avalc = 'Y'), %str(Any), , , 38, 2, 4);
+
+
+
+
+
+%mu_setall(in_data_list = sec10_0 sec10 sec20_0 sec20 sec21_0 sec21 sec22_0 sec22 sec23_0 sec23 sec24_0 sec24
+                          sec30_0 sec30 sec31_0 sec31 sec32_0 sec32 sec33_0 sec33 sec34_0 sec34 sec35_0 sec35 sec36_0 sec36 sec37_0 sec37
+                        sec38_0 sec38_2,
+           out_data = counts,
+           trigger_replace_out_data = y);
+ 
+data denom;
+    set counts;
+    keep &_default_trtvar. _section_ n;
+    rename n = denom;
+    where _order1_ = 0;
+run;
+ 
+%ma_n_pcnt(in_data = counts,
+           in_denom_data = denom,
+           in_denom_var = denom,
+           IN_DENOM_MERGE_VARS = &_default_trtvar. _section_,
+           no_pcnt_if = _order1_ = 0, PCNT_FOR_ZERO_NUM = Y, blank_for_zero_denom = N,
+           out_data = n_pcnt); 
+
+** 95% CI; 
+%macro cp_ci (outdt, section, sec);
+	%clopper(datain=&_default_in_data., vac=(&vacc.), sar=&sfl., sec=&sec., dataout=&outdt._);
+ 
+	data &outdt.; 
+		set &outdt._;
+	run;	
+%mend cp_ci;
+
+%cp_ci(sec10_1, 10, 'AR');
+%cp_ci(sec20_1, 20, 'LAR');
+%cp_ci(sec30_1, 30, 'SAR');
+
+data sec_clopper;
+length n_pcnt $50 trtvarn $2;
+set	sec10_1(in = a) sec20_1(in = b) sec30_1(in = c);
+
+if trt = 'Placebo' and cohort = '>=18 and <55 Years' then TRTVARN = '4';
+else if trt = 'Placebo' and cohort = '>=55 Years' then TRTVARN = '7';
+else if trt = 'Placebo' and cohort = 'Overall' then TRTVARN = '1';
+else if trt = 'mRNA-1273 100 ug' and cohort = '>=18 and <55 Years' then TRTVARN = '6';
+else if trt = 'mRNA-1273 100 ug' and cohort = '>=55 Years' then TRTVARN = '9';
+else if trt = 'mRNA-1273 100 ug' and cohort = 'Overall' then TRTVARN = '3';
+else if trt = 'mRNA-1273 50 ug' and cohort = '>=18 and <55 Years' then TRTVARN = '5';
+else if trt = 'mRNA-1273 50 ug' and cohort = '>=55 Years' then TRTVARN = '8';
+else if trt = 'mRNA-1273 50 ug' and cohort = 'Overall' then TRTVARN = '2';
+else if trt = 'mRNA-1273 Total' and cohort = '>=18 and <55 Years' then TRTVARN = '88';
+else if trt = 'mRNA-1273 Total' and cohort = '>=55 Years' then TRTVARN = '99';
+else if trt = 'mRNA-1273 Total' and cohort = 'Overall' then TRTVARN = '77';
+col1='95% CI';
+n_pcnt=cat(strip(put(round(lowercl,0.1),4.1)),', ',strip(put(round(uppercl,0.1),4.1)));
+if a then do;
+_section_=10;
+_skipvar_=10;
+end;
+else if b then do;
+_section_=20;
+_skipvar_=20;
+end;
+else if c then do;
+_section_=30;
+_skipvar_=30;
+end;
+_order1_=3;
+_indent_=2;
+run;
+
+
+
+%mu_setall(in_data_list = n_pcnt sec_clopper,
+           out_data = n_pcnt_ci,
+           trigger_replace_out_data = y);
+        
+%mu_transpose(in_data = n_pcnt_ci,
+              transpose_vars = n pcnt n_pcnt,
+              transpose_by = _section_ _order1_ col1 _indent_ _skipvar_,
+              transpose_id = &_default_trtvar.,
+              out_data = trans);
+%mu_get_sort_order(in_data = trans);
+
+data trans1(where= (_order1_ ne 3)) trans2(where= (_order1_ = 3));
+    set trans;
+    if index(col1, 'Any Soli') then _indent_ = 2;
+    if index(col1, '95%') then _indent_= 4;
+    if _section_ <= 10 then _skipvar_ = 10;
+    else if 10 < _section_ <30 then _skipvar_ = 20;
+    else _skipvar_ = 30;
+run;
+
+proc sql noprint;
+    select distinct name into: npcntvars separated by " " from dictionary.columns where libname = 'WORK' and memname= 'TRANS' and upcase(name) in ('N_PCNT_1' 'N_PCNT_2' 'N_PCNT_3' 'N_PCNT_77');
+    select distinct name into: npcntvars2 separated by " " from dictionary.columns where libname = 'WORK' and memname= 'TRANS' and
+        index(upcase(name), 'N_PCNT') and upcase(name) not in ('N_PCNT_1' 'N_PCNT_2' 'N_PCNT_3' 'N_PCNT_77');
+quit;
+ 
+%table_align( in_data=trans1 ,out_data=align1 ,_nudge_ = 9,npcntvars=&npcntvars.);
+%table_align( in_data=align1 ,out_data=align2 ,_nudge_ = 3,npcntvars=&npcntvars2.);
+
+ data align2;
+    set align2 trans2;
+run; 
+
+  %if &G_OUTTYPE =INTEXT %then %do;  
+  	%mw_post_process(indata =align2,column1=col1);
+  %end;
+	
+proc sort data = align2;
+    by _SECTION_  _ORDER1_  COL1  _INDENT_  _SKIPVAR_;
+run;	  
+ %mu_get_sort_order(align2);
+	
+%mr_pack(in_data = align2,
+         out_data = pack,
+         var = col1,  
+        %if &G_OUTTYPE =INTEXT %then %do;  
+	 		 col1_width_pcnt        = %sysevalf(&_default_col1_width_pcnt. + 5)
+	 	%end;
+	 	%if &G_OUTTYPE NE INTEXT %THEN %do;  
+	 		col1_width_pcnt        =  &_default_col1_width_pcnt. 
+		%end;
+          );
+         
+data pack;
+    set pack;
+    if _order1_ = 3 then do;
+        n_pcnt_1 = "\qc "||strip(n_pcnt_1 );
+        n_pcnt_2 = "\qc "||strip(n_pcnt_2 );
+        n_pcnt_3 = "\qc "||strip(n_pcnt_3 );
+        n_pcnt_4 = "\qc "||strip(n_pcnt_4 );
+        n_pcnt_5 = "\qc "||strip(n_pcnt_5 );
+        n_pcnt_6 = "\qc "||strip(n_pcnt_6 );
+        n_pcnt_7 = "\qc "||strip(n_pcnt_7 );
+        n_pcnt_70= "\qc "||strip(n_pcnt_70);
+        n_pcnt_77= "\qc "||strip(n_pcnt_77);
+        n_pcnt_8 = "\qc "||strip(n_pcnt_8 );
+        n_pcnt_80= "\qc "||strip(n_pcnt_80);
+        n_pcnt_88= "\qc "||strip(n_pcnt_88);
+        n_pcnt_9 = "\qc "||strip(n_pcnt_9 );
+        n_pcnt_90= "\qc "||strip(n_pcnt_90);
+        n_pcnt_99= "\qc "||strip(n_pcnt_99);
+    end;
+        if n_1 = 0 then n_pcnt_1 = trim(tranwrd(n_pcnt_1, '(<0.1)', ''));
+        if n_2 = 0 then n_pcnt_2 = trim(tranwrd(n_pcnt_2 , '(<0.1)', ''));
+        if n_3 = 0 then n_pcnt_3 = trim(tranwrd(n_pcnt_3 , '(<0.1)', ''));
+        if n_4 = 0 then n_pcnt_4 = trim(tranwrd(n_pcnt_4 , '(<0.1)', ''));
+        if n_5 = 0 then n_pcnt_5 = trim(tranwrd(n_pcnt_5 , '(<0.1)', ''));
+        if n_6 = 0 then n_pcnt_6 = trim(tranwrd(n_pcnt_6 , '(<0.1)', ''));
+        if n_7 = 0 then n_pcnt_7 = trim(tranwrd(n_pcnt_7 , '(<0.1)', ''));
+        if n_70= 0 then n_pcnt_70= trim(tranwrd(n_pcnt_70, '(<0.1)', ''));
+        if n_77= 0 then n_pcnt_77= trim(tranwrd(n_pcnt_77, '(<0.1)', ''));
+        if n_8 = 0 then n_pcnt_8 = trim(tranwrd(n_pcnt_8 , '(<0.1)', ''));
+        if n_80= 0 then n_pcnt_80= trim(tranwrd(n_pcnt_80, '(<0.1)', ''));
+        if n_88= 0 then n_pcnt_88= trim(tranwrd(n_pcnt_88, '(<0.1)', ''));
+        if n_9 = 0 then n_pcnt_9 = trim(tranwrd(n_pcnt_9 , '(<0.1)', ''));
+        if n_90= 0 then n_pcnt_90= trim(tranwrd(n_pcnt_90, '(<0.1)', ''));
+        if n_99= 0 then n_pcnt_99= trim(tranwrd(n_pcnt_99, '(<0.1)', ''));
+
+run;
+proc sort data = pack;
+    by &sort_order.;
+run;
+
+
+%get_tf
+            (metadata_filepath = &tf_extract.
+    	 ,tlf_progname      = &GET_TF_ID     
+  	 ,escapechar        = &_DEFAULT_ESCAPECHAR
+  	 ,use_parse_char    = YES
+  	 ,write_titles      = &_default_write_titles.
+  	 ,write_footnotes   = &_default_write_footnotes.
+  	 ,out_tf_dataset    = YES
+  	 ,globaltfs         = 1
+  	 ,Footnote_overline= &_default_Footnote_overline.
+           ,Footnote_hanging_indent = &_default_hanging_indent 
+ 	  )*; 
+
+
+%mu_lines_per_page(in_data = pack, linesperpage = 40, NESTED_HEADERLINES = 2);
+
+%mr_pagebreak_table(in_data = pack,
+                    out_data = pagebreak,
+                    section = _section_,
+                    subgrp = ,
+                    orderby = &sort_order.,
+                    section_protection = Y,
+                    lineskip = 1);
+
+ %if &G_OUTTYPE =INTEXT %then %do; 
+     proc sql noprint;
+   	 select distinct name into: n_val separated by " " from dictionary.columns where libname = 'WORK' and memname= 'PAGEBREAK' 
+   		 and index(upcase(name),'N_PCNT')>0; 
+       quit;
+       
+       *stip N_pcnt values; 
+   	data pagebreak;
+   		set pagebreak;
+   		&keep.;;
+   		pagenum = 1; 
+   		
+   		array nstrip {*} &n_val.;		
+   		do i = 1 to dim(nstrip); 
+   			nstrip{i}  =strip(nstrip{i});  
+   		end;   
+   		
+   		
+		pack_col1 = tranwrd(pack_col1," -^n   N1"," - N1"); 
+		pack_col1 = tranwrd(pack_col1,"Solicited adverse reactions -^n N1","Solicited adverse reactions - N1"); 
+		pack_col1 = tranwrd(pack_col1,"Lymphadenopathy - N1^n   ^R/RTF'{\super a \i0}'","Lymphadenopathy - N1^R/RTF'{\super a \i0}'");   
+   	run; 
+   %end; 
+   
+   
+%table_report(type=A, in_data=pagebreak, column_1=pack_col1, col1_label=Solicited Adverse$  Reaction$   Category$     Grade);

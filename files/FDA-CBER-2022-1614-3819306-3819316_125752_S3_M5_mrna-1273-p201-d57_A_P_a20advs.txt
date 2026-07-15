@@ -1,0 +1,480 @@
+*************************************************************************************************;
+* 
+*           CLIENT:  ModernaTX, Inc.
+*         PROTOCOL:  mRNA-1273-P201
+*
+*          PURPOSE: Create analysis dataset adsl
+*      
+*      INPUT FILES: SDTM domains
+*     OUTPUT FILES: ADVS.sas7bdat
+*
+*      USAGE NOTES: 
+*      
+*************************************************************************************************;
+*  (c) 2020 PPD
+*  All Rights Reserved. 
+*************************************************************************************************;
+
+**Assign global macro variable DSETNAME to reflect the name of the final ADaM dataset**;
+%include "madam.sas";
+
+%global DSETNAME;
+%let dsetname = advs;
+%let adam_spec_loc = &g_projectpath.&g_toplevel.\Documents\Specs;
+%let adam_spec = Moderna mRNA1273P201 ADaM spec.xlsm;
+ 
+proc format;
+	invalue avisitn
+	 "Baseline" = 1 
+	  "Day 1"    = 2 
+	  "Day 8"    = 3 
+	  "Day 15"   = 4 
+	  "Day 29"   = 5 
+	  "Day 36"   = 6 
+	  "Day 43"   = 7 
+	  "Day 57"   = 8 
+	  "Day 209"  = 9 
+	  "Day 394"  = 10
+	  ; 
+	  
+	value $ ATOXDSCH 
+	  "TEMP"  = "Fever"
+	  "PULSE" = "Tachycardia"
+	  "SYSBP" = "Systolic Hypertension"
+	  "DIABP" = "Diastolic Hypertension"
+	  "RESP"  = "Respiratory Rate Increased"
+	  other = " "
+	;  
+  
+	value $ ATOXDSCL  
+	  "PULSE" = "Bradycardia"
+	  "SYSBP" = "Hypotension"
+	  other = " "
+	;  	
+	
+	invalue ATOXGRN 
+		"Grade 0" = 0
+		"Grade 1" = 1
+		"Grade 2" = 2
+		"Grade 3" = 3
+		"Grade 4" = 4
+		Other = .
+	;
+	
+	
+	value $ AWRANGE 
+	  "Baseline" =  "<=1 Pre-dose"
+	  "Day 1"    =  "Day 1 Post-dose"
+	  "Day 8"    =  "After Day 1 Post-dose - Day 11"
+	  "Day 15"   =  "Day 12 - Day 22" 
+	  "Day 29"   =  "Day 23 - Day 32" 
+	  "Day 36"   =  "Day 33 - Day 39" 
+	  "Day 43"   =  "Day 40 - Day 50"
+	  "Day 57"   =  "Day 51 - Day 133"
+	  "Day 209"  =  "Day 134 - Day 301"
+	  "Day 394"  =  ">= Day 302"
+	  Other = ' '
+	  ; 
+	  
+	  invalue AWTARGET
+	 "Baseline"  = 1 
+	  "Day 1"    = 1
+	  "Day 8"    = 8
+	  "Day 15"   = 15 
+	  "Day 29"   = 29
+	  "Day 36"   = 36
+	  "Day 43"   = 43
+	  "Day 57"   = 57 
+	  "Day 209"  = 209 
+	  "Day 394"  = 394
+	  ; 
+run;
+
+*VSTEST format;
+proc sql noprint;
+	create table VSTEST as select distinct	
+	vstestcd as start, 
+	strip(vstest)||' ('||strip(vsstresu)||')' as label,
+	'$VSTEST' as fmtname
+	from trans.vs
+	where VSSTRESU ne '';
+quit;
+
+proc format cntlin = vstest;
+run;
+
+%let keep = DOSE2FL DOSE1FL tr01sdt tr01sdtm TR01edt TR01edtm  dos2dtm DOSE2DT DTHDT cutoffdt  EOSDT;
+proc sort data = adb.adsl out =adsl (keep =&keep. usubjid  ); 
+	by usubjid;
+run;
+ 
+ proc sort data = trans.sv out= sv_visit_7  (keep = usubjid svstdtc rename = (svstdtc=Visit_7));
+	where VISIT = 'Visit 7 Day 57';
+	by usubjid;
+run;
+
+proc sort data = trans.sv out= sv_visit_4 (keep = usubjid svstdtc rename = (svstdtc=Visit_4));
+	where VISIT =  'Visit 4 Day 29';
+	by usubjid;
+run;
+
+%revsupp(
+libin=TRANS, 
+libout=WORK, 
+ds=VS, 
+supp=SUPPVS,
+maploc=&G_PROJECTPATH.\&G_toplevel.\Databases\Transformed,
+mapspec=&G_NICKNAME._mapping_spec.xlsx
+);
+ 
+data vs;
+ 	set VS;
+ 	
+	if  VSCAT = 'REACTOGENICITY' then delete;
+	if VSSTAT = 'NOT DONE' then delete;
+run;
+
+data advs1;  
+length ASTAGE $30.;
+	merge vs (in=a  ) adsl (in=b) sv_visit_4 sv_visit_7;
+	by usubjid;
+	if a and b ;
+	*Assign vars; 
+	PARAMCD = VSTESTCD;
+	PARAM   = put(PARAMCD, $VSTEST.);
+	AVAL    = VSSTRESN;  
+	
+	*datetime var;
+	if length(VSDTC) >= 10  then ADT  = input(VSDTC, yymmdd10.);;  
+	if length(VSDTC)=16     then ADTM = input( VSDTC ,E8601DT16.);
+	if ADTM ne .            then ATM  = timepart(ADTM);
+	
+ 	/*	ADY*/
+	if nmiss(ADT, tr01sdt) eq 0 then do;
+		if ADT < tr01sdt then ADY = ADT - tr01sdt;
+		else ADY = ADT - tr01sdt + 1;
+	end;
+	
+	
+	*ASTAGE; 	
+	if length(Visit_7) >= 10  then Visit_7_dt  = input (Visit_7, yymmdd10.);  
+	if length(Visit_7)=16     then Visit_7_dtm = input( Visit_7 ,E8601DT16.); 
+	
+	if length(Visit_4) >= 10  then Visit_4_dt  = input (Visit_4, yymmdd10.);  
+	if length(Visit_4)=16     then Visit_4_dtm = input( Visit_4 ,E8601DT16.); 
+	
+	*Dosed two times;
+	if DOSE1FL = 'Y' and DOSE2FL = 'Y' then do;
+		enddate = min(coalesce(EOSDT,9999999999),coalesce(DTHDT,9999999999),coalesce(Visit_7_dt),9999999999);
+		if enddate = 9999999999 then enddate = .;
+		
+			 if nmiss(TR01SDTM, ADTM,enddate) = 0 and TR01SDTM <= ADTM and datepart(ADTM) <= enddate then ASTAGE = 'Vaccination stage';
+		else if nmiss(TR01SDT, ADT,enddate) = 0 and TR01SDT <= ADT and ADT <= enddate and ADTM=. then ASTAGE = 'Vaccination stage';
+		else if enddate = .  and (TR01SDTM <= ADTM or (TR01SDT <=ADT and nmiss(TR01SDTM,ADTM) ne 0 ) ) then ASTAGE = 'Vaccination stage';
+		else if nmiss(Visit_7_dtm,ADTM) = 0 and adtm > Visit_7_dtm then ASTAGE = 'Follow up stage';
+		else if nmiss(Visit_7_dt,ADT) = 0 and adt > Visit_7_dt     then ASTAGE = 'Follow up stage';
+	end;
+	*First dose only;
+	if DOSE1FL = 'Y' and DOSE2FL ne 'Y' then do;
+		enddate = min(coalesce(EOSDT,9999999999),coalesce(DTHDT,9999999999),coalesce(Visit_4_dt),9999999999);
+		if enddate = 9999999999 then enddate = .;
+		
+			 if nmiss(TR01SDTM, ADTM,enddate) = 0 and TR01SDTM <= ADTM and datepart(ADTM) <= enddate then ASTAGE = 'Vaccination stage';
+		else if enddate = . and (TR01SDTM <= ADTM or (TR01SDT <=ADT and nmiss(TR01SDTM,ADTM) ne 0 ) )  then ASTAGE = 'Vaccination stage';
+		else if nmiss(Visit_4_dtm,ADTM) = 0 and adtm > Visit_4_dtm then ASTAGE = 'Follow up stage';
+		else if nmiss(Visit_4_dt,ADT) = 0 and adt > Visit_4_dt     then ASTAGE = 'Follow up stage';
+	end;
+	if ASTAGE = 'Vaccination stage' then ASTAGEN = 1;
+	if ASTAGE = 'Follow up stage'   then ASTAGEN = 2;
+	 
+	 *MDOSREF;
+	if nmiss(TR01sdtm , adtm, dos2dtm) = 0 and TR01sdtm<=adtm < dos2dtm then MDOSREF = 'Vaccination 1';
+	else if nmiss(TR01sdtm , adtm) = 0 and TR01sdtm<=adtm and dos2dtm = . then MDOSREF = 'Vaccination 1';
+	else if nmiss(TR01sdtm , adtm) ne 0 then do;
+		if nmiss(TR01sdt , adt, dose2dt) = 0 and TR01sdt<=adt < dose2dt then MDOSREF = 'Vaccination 1';
+		else if nmiss(TR01sdt , adt) = 0 and TR01sdt<=adt and dose2dt = . then MDOSREF = 'Vaccination 1';
+	end;
+	
+	*Dose 2;
+	if nmiss(adtm, dos2dtm) = 0 and adtm >= dos2dtm then MDOSREF = 'Vaccination 2';
+	else if nmiss(dos2dtm , adtm) ne 0 then do;
+	if nmiss(adt, dose2dt) = 0 and  adt >= dose2dt then MDOSREF = 'Vaccination 2';
+	end;
+	
+	*MRDDY;
+	if MDOSREF = 'Vaccination 1' and nmiss(adt, tr01sdt) =0 then MRDDY = ADT - TR01SDT + 1;
+	if MDOSREF = 'Vaccination 2' and nmiss(adt, DOSE2DT) =0 then MRDDY = ADT - DOSE2DT + 1;
+	*Toxicity Grade;
+	 ATOXDSCL = put(PARAMCD, $ATOXDSCL.);
+	 ATOXDSCH = put(PARAMCD, $ATOXDSCH.);
+	 
+	 *PULSE;
+	if paramcd in ( "PULSE"  ) and AVAL ne . then do;
+		*ATOXGRL;
+		     if  50<=AVAL<=54 then ATOXGRL = 'Grade 1';
+		else if  45<=AVAL<=49 then ATOXGRL = 'Grade 2';  
+		else if  AVAL<45      then ATOXGRL = 'Grade 3'; 
+		else ATOXGRL = 'Grade 0';
+		
+		*ATOXGRH;
+		     if  101<=AVAL<=115 then ATOXGRH = 'Grade 1';
+		else if  116<=AVAL<=130 then ATOXGRH = 'Grade 2';  
+		else if  AVAL>130       then ATOXGRH = 'Grade 3';    
+		else ATOXGRH = 'Grade 0';
+	end;
+	
+	*SYSBP;
+	if paramcd in ( "SYSBP"  ) and AVAL ne . then do;
+		*ATOXGRL;
+		     if  85<=AVAL<=89 then ATOXGRL = 'Grade 1';
+		else if  80<=AVAL<=84 then ATOXGRL = 'Grade 2';  
+		else if  AVAL<80      then ATOXGRL = 'Grade 3';  
+		else ATOXGRL = 'Grade 0';
+		
+		*ATOXGRH;
+		     if  141<=AVAL<=150 then ATOXGRH = 'Grade 1';
+		else if  151<=AVAL<=155 then ATOXGRH = 'Grade 2';  
+		else if  AVAL>155       then ATOXGRH = 'Grade 3';   
+		else ATOXGRH = 'Grade 0';
+	end;
+	
+	if paramcd in ( "TEMP"  ) and AVAL ne . then do; 		
+		*ATOXGRH;
+		     if  38 <=AVAL<=38.4   then ATOXGRH = 'Grade 1';
+		else if  38.5<=AVAL<=38.9  then ATOXGRH = 'Grade 2';  
+		else if  39.0<=AVAL<=40.0  then ATOXGRH = 'Grade 3';  
+		else if  AVAL>40 then ATOXGRH = 'Grade 4';  
+		else ATOXGRH = 'Grade 0';
+	end;
+	
+	if paramcd in ( "DIABP"  ) and AVAL ne . then do; 		
+		*ATOXGRH;
+		     if  91 <=AVAL<=95  then ATOXGRH = 'Grade 1';
+		else if  96<=AVAL<=100  then ATOXGRH = 'Grade 2';  
+		else if  AVAL>100       then ATOXGRH = 'Grade 3';   
+		else ATOXGRH = 'Grade 0';
+	end;
+	
+	if paramcd in ( "RESP"  ) and AVAL ne . then do; 		
+		*ATOXGRH;
+		     if  17 <=AVAL<=20  then ATOXGRH = 'Grade 1';
+		else if  21<=AVAL<=25   then ATOXGRH = 'Grade 2';  
+		else if  AVAL>25        then ATOXGRH = 'Grade 3';  
+		else ATOXGRH = 'Grade 0';
+	end; 
+	ATOXGRHN = input(ATOXGRH, ATOXGRN.);
+	ATOXGRLN = input(ATOXGRL, ATOXGRN.);
+run;  
+
+*ABLFL;
+data ABLFL;
+	set Advs1;
+	if ((nmiss(Tr01sdtm, adtm) = 0 and adtm<=Tr01sdtm) or (nmiss(Tr01sdt, adt) = 0 and adt<=Tr01sdt)) and aval ne . ;
+	if tr01sdt = adt and nmiss(adt, tr01sdt) = 0 and VSTPT ne 'PRE-DOSE' then delete;
+	
+	BASE     = AVAL;
+	ABLFL    = 'Y';
+	BASEDTM  = ADTM;
+	BASEDT   = ADT;
+	BTOXGRL  = ATOXGRL ;
+	BTOXGRLN = ATOXGRLN;
+	BTOXGRH  = ATOXGRH ;
+	BTOXGRHN = ATOXGRHN;
+
+	keep usubjid paramcd BASE ABLFL BASEDTM BASEDT vsseq BTOXGRL BTOXGRLN BTOXGRH BTOXGRHN visitnum;
+run;
+proc sort; by usubjid paramcd descending BASEDT descending BASEDTM visitnum vsseq; run;
+proc sort nodupkey; by usubjid paramcd; run;
+proc sort ; by usubjid paramcd vsseq; run;
+proc sort data = advs1; by usubjid paramcd vsseq; run;
+
+*remerge ABLFL;
+data advs2;;
+	merge advs1 ablfl (keep = usubjid paramcd vsseq ablfl);
+	by usubjid paramcd vsseq;
+run;
+
+*remerge BASE;
+data advs3;;
+	merge advs2 ablfl (keep = usubjid paramcd base basedtm basedt BTOXGRL BTOXGRLN BTOXGRH BTOXGRHN);
+	by usubjid paramcd ;
+run;
+ 
+ data advs4;
+ length AVISIT $50.;
+ 	set advs3;
+ 	
+*AVISIT derivation;	
+	*AVISIT(N); 
+	         If ABLFL='Y' then AVISIT = 'Baseline';
+		else if VISIT='Visit 1 Day 1' and VSTPT='POST-DOSE' then AVISIT='Day 1';
+		else if ADY>1 and index(visit, 'Unsched')=0 and index(visit, 'Day')> 0 then AVISIT ='Day '||strip(scan(visit,4,' ') );
+		else if ADY>1 and index(visit, 'Unsched')>0 then do;
+				 if  1<=ADY<=11     then AVISIT = 'Day 8'; 	
+			else if  12<=ADY<=22    then AVISIT = 'Day 15'; 
+			else if  23<=ADY<=32    then AVISIT = 'Day 29'; 
+			else if  33<=ADY<=39    then AVISIT = 'Day 36'; 
+			else if  40<=ADY<=50    then AVISIT = 'Day 43'; 
+			else if  51<=ADY<=133   then AVISIT = 'Day 57'; 
+			else if  134=<ADY<=301  then AVISIT = 'Day 209'; 
+			else if  ADY>=302       then AVISIT = 'Day 394';			
+		end;
+		AVISITN = input(avisit, avisitn.);
+run;
+	
+proc sort data = advs4;
+	by usubjid avisitn  ady; 
+run;
+
+data advs5;
+length SHIFT1 SHIFT2 $20.  AWRANGE $30.;
+	set advs4;
+	by usubjid avisitn ady;
+	retain check_visit;
+	
+	*Set for unscheduled visits that came before scheduled;
+	if first.usubjid then check_visit = ady;
+	if Check_visit < ady then check_visit = ady; 
+	if index(visit,'Unsched') > 0 and Check_visit > ady and ablfl ne 'Y' then do;
+		AVISIT  = '' ;
+		AVISITN = .  ;
+	end; 
+		
+	*Post Baseline derivation;
+	if ((basedtm<adtm and nmiss(basedtm, adtm) = 0 ) or (basedt<adt and nmiss(basedt, adt) = 0 ) ) and aval ne . then do;
+		*CHG & PCHG;
+		if nmiss(AVAL ,BASE) = 0 then do;
+			CHG  = AVAL - BASE;
+			if BASE ne 0 and CHG ne . then PCHG =( CHG / BASE )*100;
+		end;
+		
+		
+		*SHIFT variables;
+		if paramcd in ('PULSE' 'SYSBP') then SHIFT1 = strip(coalescec(BTOXGRL,'UNK'))||' to '||strip(coalescec(ATOXGRL,'UNK'));
+		if paramcd in ('PULSE' 'SYSBP' 'TEMP' 'RESP' 'DIABP') then SHIFT2 = strip(coalescec(BTOXGRH,'UNK'))||' to '||strip(coalescec(ATOXGRH,'UNK'));	
+	end;
+	
+	*AWRxxxx;
+	AWRANGE  = put(AVISIT,$AWRANGE.);
+	AWTARGET = input(AVISIT,AWTARGET.);
+	if nmiss(AWTARGET, ADY) = 0 then do;
+		AWTDIFF = abs(ADY - AWTARGET);
+		AWU     = 'DAYS';
+	end;
+run;
+
+*ANL01FL;
+data ANL01FL;
+	set advs5;
+	if ((basedtm<adtm and nmiss(basedtm, adtm) = 0 ) or (basedt<adt and nmiss(basedt, adt) = 0 ) or ABLFL = 'Y' ) and aval ne .;
+	
+	if  index(VISIT,'Unsch') = 0 and AVISIT ne '' then ID = 1;
+	if  index(VISIT,'Unsch') > 0 and AVISIT ne '' then ID = 2;
+	
+	if ID = . then delete;
+	keep usubjid paramcd vsseq adtm adt vstptnum AWTDIFF ID AVISIT avisitn; 
+run;
+
+proc sort; by usubjid paramcd  AVISIT avisitn ID adt  vstptnum descending vsseq; run;
+proc sort nodupkey; by usubjid paramcd  AVISIT avisitn vstptnum; run;
+
+*ANL02FL;
+data ANL02FL;
+	set advs5;
+	if ((basedtm<adtm and nmiss(basedtm, adtm) = 0 ) or (basedt<adt and nmiss(basedt, adt) = 0 ) or ABLFL = 'Y' )
+	and aval ne . and   ATOXGRLN ne . and not missing(ATOXDSCL) and PARAMCD in ('SYSBP' 'PULSE') and avisit not in ('' 'Baseline');
+	
+	if  index(VISIT,'Unsch') = 0 and AVISIT ne '' then ID = 1;
+	if  index(VISIT,'Unsch') > 0 and AVISIT ne '' then ID = 2;
+		
+	keep usubjid paramcd vsseq adtm adt vstptnum AVISITn avisit atoxgrln atm ID; 
+run;
+
+proc sort; by usubjid paramcd  AVISIT avisitn  descending  atoxgrln adt vstptnum atm vsseq; run;
+proc sort nodupkey; by usubjid paramcd AVISIT avisitn vstptnum; run;
+
+*ANL03FL;
+data ANL03FL;
+	set advs5;
+	if ((basedtm<adtm and nmiss(basedtm, adtm) = 0 ) or (basedt<adt and nmiss(basedt, adt) = 0 ) or ABLFL = 'Y' )
+	and aval ne . and ATOXGRHN ne . and not missing(ATOXDSCH) and  paramcd in ('PULSE' 'SYSBP' 'TEMP' 'RESP' 'DIABP') and avisit not in ('' 'Baseline');
+	
+	if  index(VISIT,'Unsch') = 0 and AVISIT ne '' then ID = 1;
+	if  index(VISIT,'Unsch') > 0 and AVISIT ne '' then ID = 2;
+		
+	keep usubjid paramcd vsseq adtm adt vstptnum AVISITn avisit ATOXGRHN atm ID ; 
+run;
+
+proc sort; by usubjid paramcd  AVISIT avisitn descending ATOXGRHN adt vstptnum atm vsseq; run;
+proc sort nodupkey; by usubjid paramcd AVISIT avisitn vstptnum; run;
+
+proc sort data = advs5; 
+	by usubjid paramcd adt avisit avisitn vstptnum vsseq;
+run;
+proc sort data = anl01fl; 
+	by usubjid paramcd adt avisit avisitn vstptnum vsseq;
+run;
+proc sort data = anl02fl; 
+	by usubjid paramcd adt avisit avisitn vstptnum vsseq;
+run;
+proc sort data = anl03fl; 
+	by usubjid paramcd adt avisit avisitn vstptnum vsseq;
+run;
+
+data advs;
+		merge advs5 
+		anl01fl (in=anl1  keep = usubjid paramcd adt avisit avisitn vsseq vstptnum) 
+		anl02fl (in=anl2 keep = usubjid paramcd adt avisit avisitn vsseq  vstptnum)
+		anl03fl (in=anl3 keep = usubjid paramcd adt avisit avisitn vsseq  vstptnum) ;
+		by  usubjid paramcd adt avisit avisitn vstptnum vsseq;
+		
+		if anl1 or ablfl = 'Y' then ANL01FL = 'Y';
+		if anl2 then ANL02FL = 'Y';
+		if anl3 then ANL03FL = 'Y';
+run;
+	
+proc sort;
+	by USUBJID PARAMCD AVISITN VSDTC VISITNUM;
+run;
+ 
+%mergeadsl(&DSETNAME.,keep=usubjid subjid );
+%trta(dsname=&DSETNAME);
+
+**Generate final dataset by updating certain attributes. Optionally merge common variables & create sequence variable as needed**;
+%adam_dataset_update(
+	ds=&DSETNAME,
+	libin=work,
+	libout=output,
+	adsllib=adb,
+	addcomvar=Y,
+	addseq=,
+	dropinfmt=Y,
+	mapspecfile=&ADAM_SPEC,
+	maploc=&ADAM_SPEC_LOC,
+	debug=N
+	);
+	
+	
+%macro dod;
+**Generate Value Level Metadata values for the ad<xx> dataset**;
+% dod_vlm(        
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&G_PROJECTPATH.&G_TOPLEVEL.\Documents\Specs\,
+	specname=&G_NICKNAME._ADaM_Spec.xlsm,
+	debug=N
+	);
+
+**Generate Enhanced Controlled Terminology for the ad<xx> dataset**;
+% dod_enhcd_ct(            
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&G_PROJECTPATH.&G_TOPLEVEL.\Documents\Specs\,
+	specname=&G_NICKNAME._ADaM_Spec.xlsm,
+	map_ct_nm=,
+	map_ct_loc=,
+	debug=N
+	);
+%mend;

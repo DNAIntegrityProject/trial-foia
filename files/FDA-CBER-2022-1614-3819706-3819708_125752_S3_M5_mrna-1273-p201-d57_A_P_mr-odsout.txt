@@ -1,0 +1,128 @@
+%macro mr_odsout
+( escapechar    = &_default_escapechar
+, style         = &_default_template_style
+, filecase      = &_default_filecase
+, options       = nogtitle nogfoot
+, deliverableid = &g_deliverableid
+, idcompress    = %str(.)
+, validation_yn = N
+, val_path      = 
+)  /  store  source  des='V1.0.0.7' ;
+%*************************************************************************
+*       PROGRAM NAME:   mr_odsout.sas
+*            PURPOSE:   Set ODS options for TLF programming
+*
+*        INPUT FILES:   
+*       OUTPUT FILES:   
+*
+*        USAGE NOTES:   
+*
+*              NOTES:   
+*
+*   MODIFICATION LOG:   
+*************************************************************************
+* DATE          BY              DESCRIPTION
+*************************************************************************
+* MM/DD/YYYY    USERID          Complete description of modification made
+*                               including reference to source of change.
+*
+*************************************************************************
+*  © Pharmaceutical Product Development, Inc., 2017
+*  All Rights Reserved.
+*************************************************************************;
+
+
+  ods noresults escapechar = "&escapechar.";
+  ods listing close;
+ 
+ data _null_;
+ 
+ call symput("deliverableid" , compress("&deliverableid", "&idcompress"));
+ run;
+
+ **If g_user_level doesnt exist, assign it as 0**;
+ %if %symexist(g_user_level) %then %do; %end; 
+ %else %do;
+	 %global g_user_level;
+	 %let g_user_level=0;
+ %end;
+
+ %global _outarea;
+ %if &g_user_level=1 %then %let _outarea=Output_Dev;
+ %else %if &g_user_level=0 %then %let _outarea=Output;
+
+ %*** only run this part if this is a validation program;
+ %if %upcase(%substr(&validation_yn,1,1)) = Y %then %do;
+  
+        %* if val_path is missing, create an output folder under the work library;
+        %if "&val_path" eq "" %then %do ;
+          option noxwait xsync ;
+
+          %local workpath outfold rc rc1 ;
+          %let workpath = %sysfunc(pathname(work));
+          %let outfold = &workpath.\&_outarea.;
+          %let rc=%sysfunc(filename(fileref));
+          %let rc = %sysfunc(filename(fileref,&outfold.));
+          %if %eval(%sysfunc(fexist(&fileref))) = 0 %then %do;
+             data _null_ ;
+                  cmd1=' mkdir "' || "&outfold." || '"' ;
+                  put cmd1= ;
+                  rc1=system( cmd1 ) ;
+                  call symputx( 'rc1', rc1 ) ;
+                  run ;
+                %if &rc1. ne 0 %then %put %str(A)LERT_I-Directory for validation output could not be created! ;
+                %let rc=%sysfunc(filename(fileref));
+                %let rc = %sysfunc(filename(fileref,&outfold.));
+         %end ;
+         
+           %** reassign libref OUTPUT to temp work space;
+          libname output "&outfold.";
+          %let val_path = %sysfunc(pathname(output));
+        %end;
+        %else %do;
+          %* check that val_path is valid;
+          libname check "&val_path";
+          %if %sysfunc(libref(check)) %then %do;
+                %put %str(ALERT)_P: VAL_PATH (&val_path) invalid. ABORT;
+                data _null_;
+                abort abend;
+                run;
+          %end;
+          
+          %* check that val_path does not refer to same location as OUTPUT;
+          %if %qupcase(%qsysfunc(pathname(output))) = %qupcase(%qsysfunc(pathname(check))) %then %do;
+                %put %str(ALERT)_P: VAL_PATH (&val_path) set to same area as OUTPUT. ABORT;
+                data _null_;
+                abort abend;
+                run;
+                
+          %end;
+          libname check clear;
+        %end;
+  
+        %* create global macvar to be used in later modules;
+        %global g_val_path;
+        %let g_val_path = &val_path;
+        %put g_val_path = &g_val_path;
+  
+        %** ODS statement;
+        %if &filecase ne %str() %then %do;
+          ods rtf file="&val_path./%&filecase.(v&deliverableid..rtf)" style=&style  &options;
+        %end;
+        %else %do;
+          ods rtf file="&val_path./v&deliverableid..rtf" style=&style  &options;
+        %end;
+  %end;
+  %else %do;
+  
+        %*** PRODUCTION FILE OUTPUT;
+        
+        %if &filecase ne %str() %then %do;
+          ods rtf file="./&_outarea./%&filecase.(&deliverableid..rtf)" style=&style  &options;
+        %end;
+        %else %do;      
+          ods rtf file="./&_outarea./&deliverableid..rtf" style=&style  &options;
+        %end;
+        
+  %end;
+%mend mr_odsout;

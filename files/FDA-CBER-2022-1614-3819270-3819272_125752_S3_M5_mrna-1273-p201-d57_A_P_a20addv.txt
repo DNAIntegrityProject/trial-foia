@@ -1,0 +1,105 @@
+*************************************************************************************************;
+* 
+*           CLIENT:  ModernaTX, Inc.
+*         PROTOCOL:  mRNA-1273-P201
+*
+*          PURPOSE: Create analysis dataset ad<xx>
+*      
+*      INPUT FILES: SDTM domains
+*     OUTPUT FILES: addv.sas7bdat
+*
+*      USAGE NOTES: 
+*      
+*************************************************************************************************;
+*  (c) 2020 PPD
+*  All Rights Reserved. 
+*************************************************************************************************;
+
+**Assign global macro variable DSETNAME to reflect the name of the final ADaM dataset**;
+options noquotelenmax;
+%global DSETNAME;
+%let dsetname = ADDV;
+%let adam_spec_loc = &g_projectpath.&g_toplevel.\Documents\Specs;
+%let adam_spec = Moderna mRNA1273P201 ADaM spec.xlsm;
+
+
+**Merge supplemental data onto parent domain**;
+%revsupp(
+	libin=trans,
+	libout=work,
+	ds=dv,
+	supp=suppdv,
+	outds=,
+	delsupp=N,
+	movsupp=N
+	);
+
+**INSERT CODE TO GENERATE DATASET**;
+
+/*Initialize non existing supp variables, subset, and keep only relevant variables for easier processing*/
+data __temp;
+    dvsig = '';
+    output;
+run;
+data __temp; set __temp; stop; run;
+data addv0; set dv __temp; run;
+
+data addv0 (drop = dvsig rename = (dvsig_ = dvsig));
+    length dvsig_ $20;
+    set addv0;
+    dvsig_ = dvsig;
+run;
+proc sql;
+    create table addv as
+    select a.* from addv0 as a  inner join adb.adsl as b on a.usubjid = b.usubjid
+    order by usubjid, dvseq;
+quit;
+
+
+**Generate final dataset by updating certain attributes. Optionally merge common variables & create sequence variable as needed**;
+%adam_dataset_update(
+	ds=&dsetname.,
+	libin=work,
+	libout=output,
+	adsllib=adb,
+	addcomvar=Y,
+	addseq=,
+	dropinfmt=Y,
+	mapspecfile=&ADAM_SPEC,
+	maploc=&ADAM_SPEC_LOC,
+	debug=Y
+	);
+
+*** quality checks;
+proc sql noprint;
+    select distinct count(*) into :indata from dictionary.columns where libname = 'WORK' and memname = 'DV' and name ? 'DVTERM';
+    select distinct count(*) into :inspec from dictionary.columns where libname = 'OUTPUT' and memname = 'ADDV' and name ? 'DVTERM';
+    %let indata = &indata.;
+    %let inspec = &inspec.;
+quit;
+
+%if &inspec ne &indata %then %do;
+    %put ALERT_P: Number of DVTERMx should be updated - SDTM DVTERMx: &indata., SPEC DVTERMx: &inspec.;
+%end;
+
+**Generate Value Level Metadata values for the ad<xx> dataset**;
+%*dod_vlm(        
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&ADAM_SPEC_LOC,
+	specname=&ADAM_SPEC,
+	debug=N
+	);
+
+**Generate Enhanced Controlled Terminology for the ad<xx> dataset**;
+%*dod_enhcd_ct(            
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&ADAM_SPEC_LOC,
+	specname=&ADAM_SPEC,
+	map_ct_nm=,
+	map_ct_loc=,
+	debug=N
+	);

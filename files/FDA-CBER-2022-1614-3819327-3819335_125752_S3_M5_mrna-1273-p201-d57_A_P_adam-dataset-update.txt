@@ -1,0 +1,372 @@
+************************************************************************
+*        CLIENT NAME:   PPD
+*           PROTOCOL:    
+*            PURPOSE:   Set attributes on ADaM Datasets from spec
+*
+*        INPUT FILES:   
+*       OUTPUT FILES:   
+*
+*        USAGE NOTES:   
+*************************************************************************
+*  © Pharmaceutical Product Development, Inc., 2016
+*  All Rights Reserved.
+*************************************************************************;
+
+%macro ADaM_Dataset_Update(ds=,libin=WORK,libout=OUTPUT,adsllib=ADB,addcomvar=Y,addseq=N,dropinfmt=N,
+                       mapspecfile=&g_nickname._ADaM_spec.xlsm, maploc=..\..\Documents\Specs,debug=N) / store des='V1.0.0.1';
+
+/**************************************************************************
+DS = name of input dataset and name of tab which contains the attributes
+**************************************************************************/
+%let err = E%str(RROR: );
+%global adam_dataset_update_rc;
+%put %str(A)LERT_I: BEGIN ADaM_Dataset_Update ========> ;
+
+************************** CHECK IF THINGS EXIST *********************;
+%if %sysfunc(libref(&libin)) ne 0 %then %do;
+	%put &err. The library &libin does not exist. Please correct the LIBIN parameter.;
+	%let adam_dataset_update_rc=RC: Invalid LIBIN;
+	%goto ERR;
+%end;
+%if %sysfunc(libref(&libout)) ne 0 %then %do;
+	%put &err. The library &libout does not exist. Please correct the LIBOUT parameter.;
+	%let adam_dataset_update_rc=RC: Invalid LIBOUT;
+	%goto ERR;
+%end;
+%if %sysfunc(fileexist(&maploc.\&mapspecfile.)) = 0 %then %do;
+	%put &err. The ADaM spec file can not be found. Make sure it exists.;
+	%let adam_dataset_update_rc=RC: Invalid MAPLOC;
+	%goto ERR;
+%end;
+%if %sysfunc(exist(&libin..&ds,DATA)) ne 1 %then %do;
+	%put &err. Dataset specified by DS value does not exist. Please correct the DS parameter.;
+	%let adam_dataset_update_rc=RC: DS does not exist in input library;
+	%goto ERR;
+%end;
+
+%if %upcase(&addcomvar) eq Y and %sysfunc(exist(&adsllib..ADSL,DATA)) ne 1 %then %do;
+	%put %str(A)LERT_R: ADSL is not present in the library &adsllib., no merging of common variables will take place;
+	%let addcomvar=N;
+%end;
+
+** check if DS tab exists, if Datasets tab exists, or if ADSL exists;
+libname inxls excel "&maploc.\&mapspecfile." header=no mixed=yes;
+	%if %sysfunc(exist(inxls.&ds.$,DATA)) ne 1 %then %let _notab=1 ; 
+		%else %if %sysfunc(exist(inxls.Datasets$,DATA)) ne 1 %then %let _notab=2 ; 
+		%else %let _notab=0;
+	%if %upcase(&addcomvar) eq Y and %sysfunc(exist(inxls.ADSL$,DATA)) ne 1 %then %do;
+		%put &str(A)LERT_R: ADSL tab does not exist in ADaM spec file., no merging of common variables will take place;
+		%let addcomvar=N;
+	%end;
+libname inxls;
+	%if &_notab eq 1 %then %do;
+		%put &err. The tab specified by DS does not exist in ADaM spec file.;
+		%let adam_dataset_update_rc=RC: DS tab does not exist in mapping spec;
+		%goto ERR;
+	%end;
+	%if &_notab eq 2 %then %do;
+		%put &err. The Datasets tab does not exist in ADaM spec file.;
+		%let adam_dataset_update_rc=RC: Datasets tab does not exist in mapping spec;
+		%goto ERR;
+	%end;
+
+
+** check if DS exists in datasets tab;
+libname inxls excel "&maploc.\&mapspecfile." header=yes mixed=yes;
+data _datasets_tab0;
+	set inxls."Datasets$"n end=last;
+
+	retain exists 0;
+	if upcase(dataset)=upcase("&ds.") then exists=1;
+
+	if last and exists ne 1 then call symput("_dstab","1");
+		else call symput("_dstab","0");
+run; 
+libname inxls;
+	%if &_dstab eq 1 %then %do;
+		%put &err. The dataset specified by DS does not exist in the Datasets tab in the ADaM spec file.;
+		%let adam_dataset_update_rc=RC: DS does not exist in mapping spec Datasets tab;
+		%goto ERR;
+	%end;
+
+************************** MACRO TO READ IN ADAM SPEC *********************;
+
+** sort by usubjid;
+proc sort data=&libin..&ds. out=_output_&ds.;
+	by studyid usubjid;
+run;
+
+%macro adam_import_tab(tabname) /des='Nested in ADaM_Dataset_Update';
+** import spec;
+libname inxls excel "&maploc.\&mapspecfile." header=no mixed=yes;
+data _adam_tab;
+	set inxls."%trim(&tabname)$"n;
+	retain specrow 0;
+	if propcase(f1)="Variable Name" then specrow=1;
+run; 
+libname inxls;
+
+** delete records before header row;
+data _adam_tab;
+	set _adam_tab;
+	if specrow=1;
+	drop specrow;
+run; 
+
+** drop empty numeric columns;
+proc contents data=_adam_tab out=_adam_tab_vars noprint nodetails;
+run;
+data _null_;
+	set _adam_tab_vars end=last;
+	if _n_=1 then call execute("data _adam_tab; set _adam_tab;");
+	if type=1 then call execute("drop "||name||";");
+	if last then call execute("run;");
+run;
+
+** rename variables to headers;
+data _null_;
+	set _adam_tab;
+	if _n_=1;
+	array F{*} F:;
+
+	call execute("data _adam_tab; set _adam_tab;");
+	do i=1 to dim(F);
+		if F{i} ne "" then do;
+			call execute('label  ' || vname(F{i}) || '="' || compress(strip(F{i}),,"ak") || '";');
+			call execute('rename ' || vname(F{i}) || '= ' || compress(strip(F{i}),,"ak") || ' ;');
+		end;
+	end;
+	call execute('run;');
+run;
+
+** remove comment rows;
+data _spec_&tabname.(rename=(xf=fmt));
+	set _adam_tab;
+
+	if _n_>1 and VariableName ne "" and upcase(VariableName)=VariableName and length(VariableName)<=8;
+	if f99="" then f99=""; drop f:; ** drop extra columns;
+	ord=_n_;
+
+	length var $ 8 lab $ 40 len 8 typ $ 4 xf $ 20;	
+	var=strip(variablename);
+	lab=variablelabel;
+	if upcase(type)="NUM" then typ="num";
+		else if upcase(type)="CHAR" then typ="char";
+	if upcase(type)="NUM" then len=8;
+		else if upcase(type)="CHAR" then len=input(length,best.);
+	if countw(controlledterms)=1 and typ="num" and
+		(prxmatch('/DT$/I',strip(var))>0|prxmatch('/TM$/I',strip(var))>0|prxmatch('/DTM$/I',strip(var))>0) 
+		then xf=controlledterms;
+run;
+%mend;
+
+************************** READ IN ADAM SPEC **************************;
+%adam_import_tab(&ds.);
+
+************************** READ IN ADSL SPEC **************************;
+%if %upcase(&addcomvar) eq Y and %upcase(&ds) eq ADSL %then
+	%put %str(A)LERT_I: The input dataset ADSL is specified in the parameter DS, therefore, no merging of common variables will take place since the common variables come from ADSL.;
+
+%if %upcase(&addcomvar) eq Y and %upcase(&ds) ne ADSL %then %do;
+	%adam_import_tab(ADSL);
+
+	data _spec_&ds.;
+		set _spec_&ds.(in=a keep=var lab len typ fmt ord)
+			_spec_adsl   (in=b keep=var lab len typ fmt ord CommonVariableFlag);
+		if a or CommonVariableFlag="Y";
+		if a then ord=ord+10000;
+
+	if CommonVariableFlag="Y" then 
+		put "A" "LERT_I: The following ADSL common variables were merged onto the input dataset: " var;
+	run;
+
+	** check ADSL spec against data to avoid overwrites;
+	proc contents data=&ds. out=_data_vars(keep=name) noprint;
+	run;
+
+	proc sql noprint;
+		create table _spec_adsl_vars as select a.var, b.name
+		from _spec_adsl as a left join _data_vars as b on upcase(a.var)=upcase(b.name)
+		where name="";
+	quit;
+
+	data _null_;
+		set _spec_adsl_vars end=last;
+
+		if _n_=1 then call execute("data _output_&ds.; merge _output_&ds.(in=a) &adsllib..adsl(keep=studyid usubjid ");
+		call execute(var);
+		if last then call execute("); by studyid usubjid; if a; run;");
+	run;
+%end;
+%else %do;
+	data _spec_&ds.;
+		set _spec_&ds.(in=a keep=var lab len typ fmt ord);
+		CommonVariableFlag="";
+	run;
+%end;
+
+************************** FINALIZE ADAM SPEC *************************;
+proc sort data=_spec_&ds.;
+	by var ord;
+run;
+
+data _spec_&ds.;
+	set _spec_&ds.;
+	by var;
+	if first.var;
+
+	if var="STUDYID" then ord=-2;
+	if var="USUBJID" then ord=-1;
+run;
+
+************************** READ IN INPUT DATA **************************;
+proc contents data=_output_&ds. out=_data_&ds.(keep=name label type length format formatl) noprint;
+run;
+
+proc sort data=_data_&ds.;
+	by name;
+run;
+
+proc sql noprint;
+	create table _spec_adb as select a.*, b.name as srcname, b.label as srclabel, 
+		ifc(b.type=1,"num",ifc(b.type=2,"char","")) as srctype, b.length as srclen,
+		ifc(b.format ne "",cats(b.format,put(b.formatl,best.),"."),"") as srcfmt
+	from _spec_&ds. as a full join _data_&ds. as b on upcase(a.var)=upcase(b.name) order by ord;
+quit;
+
+** er_ror checking;
+data _null_;
+	set _spec_adb;
+
+** variables with length in data longer than spec;
+	if .<len<srclen then 
+		put "A" "LERT_R: Variable " var $8. " is being tr_uncated. Variable length specified in the spec " "is shorter than the length in the actual data. ";
+** UR9. variables type does not match between spec and data;
+	if typ ne '' and srctype ne '' and upcase(typ) ne upcase(srctype) then 
+		put "A" "LERT_P: The variable type for " var $8. " in the input dataset does not match the spec.";
+** variables in spec but not in data;
+	if var^="" and srcname ="" then 
+		put "A" "LERT_R: Variable " var $8. " is present in the mapping spec but does not exist " "in the input dataset. Null variable created.";
+** UR12. variables not in spec, they will be dropped;
+	if var="" and srcname^="" and CommonVariableFlag ne "Y" then 
+		put "A" "LERT_I: Variable " srcname $8. " is not present in the mapping spec. Variable dropped.";
+** UR30. variables not in spec, they will be dropped;
+	if srclen=. /*var missing in input ds*/ and (lab="" or typ="" or len=.) then 
+		put "A" "LERT_P: Variable " var $8. " is present in the mapping spec but does not exist " "in the input dataset and either the variable label, type or length is missing";
+run;
+
+** set attributes from data if missing in source spec;
+data _spec_adb(keep=ord var lab len typ fmt);
+	set _spec_adb;
+	if var ne "";
+	if srclen=. /*var missing in input ds*/ and (lab="" or typ="" or len=.) then delete;
+
+	if fmt="" and len=. and srcfmt ne "" then fmt=srcfmt;
+	lab=coalescec(lab,srclabel);
+	typ=coalescec(srctype,typ); /* unequal causes a.lert_p, choose from data in this case */ 
+	len= coalesce(len,srclen  );
+run;
+
+************************** SET ATTRIBUTES FROM ADB_SPEC **************************;
+
+** intialize sequence variable if requested;
+%if %upcase(&addseq) eq Y %then %do;
+	data _spec_adb(keep=ord var lab len typ fmt);
+		set _spec_adb;
+		output;
+
+		if _n_=1 then do;
+			ord=0; var="ASEQ"; lab="Analysis Sequence Number"; len=8; typ="Num";
+			output;
+		end;
+	run;
+%end;
+
+** create shell dataset from spec data;
+proc sort data=_spec_adb;
+	by ord;
+run;
+
+data _null_;
+	set _spec_adb end=last;
+	if _n_=1 then call execute("proc sql; create table _spec_shell (");
+
+	length line1 $200;
+	line1=strip(upcase(var))||" "||strip(typ)||"("||strip(put(len,3.))||") label='"||strip(lab)||"'"||
+		ifc(fmt ne ""," format="||strip(fmt),"")||ifc(last,"",",");
+	call execute(line1);
+
+	if last then call execute("); quit;");
+run;	
+
+data _output_&ds.;
+	set _output_&ds.;
+	format _all_; 
+	%if %upcase(&dropinfmt) eq Y %then %do; 
+		informat _all_; 
+		if _n_=1 then put "A" "LERT_I: Dropping Informats";
+	%end;
+run;
+
+** set derived data into shell, prohibited messages will fire if there is t_runcation;
+data _output_&ds.;
+	set _spec_shell _output_&ds.;
+run;
+
+************************** OUTPUT DATASET **************************;
+libname inxls excel "&maploc.\&mapspecfile." header=yes mixed=yes;
+data _datasets_tab;
+	length keys keys_ $ 200;
+	set inxls."Datasets$"n;
+	if upcase(dataset)=upcase("&ds.");
+
+	if keys_ ne "" then keys=keys_; else keys_=keys_;
+	call symput("dslabel",description);
+	call symput("dskeys",compress(keys,","));
+run; 
+libname inxls;
+
+** sort dataset;
+%put %str(A)LERT_I: sorting by %trim(&dskeys.);
+proc sort data=_output_&ds.;
+	by &dskeys;
+run;
+
+** derive ASEQ if requested;
+%if %upcase(&addseq) eq Y %then %do;
+	data _output_&ds.(drop=_aseq);
+		set _output_&ds.;
+		by &dskeys;
+
+		if first.usubjid then _aseq=1;
+			else _aseq+1;
+
+		aseq=_aseq;
+	run;
+%end;
+
+** keep variables in the spec;
+data _null_;
+	set _spec_adb end=last;
+	if _n_=1 then call execute("data &libout..&ds.(label='&dslabel.' sortedby=%trim(&dskeys.)); set _output_&ds.; keep ");
+	call execute(upcase(var));
+	if last then call execute("; run;");
+run;
+
+** delete interim datasets;
+%if %upcase(&debug) eq N %then %do;
+	proc datasets library=work nodetails;
+		delete _adam_: _datasets_tab: _data_: _output_: _spec_:;
+	quit;
+%end;
+
+*****************************POINTERS FOR ER_ROR CHECKING**************************;
+%let adam_dataset_update_rc = SUCCESSFUL;
+%goto theend;
+
+%err:
+
+%theend:
+%put END with a status of &adam_dataset_update_rc;
+%mend;
+

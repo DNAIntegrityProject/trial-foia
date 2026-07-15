@@ -1,0 +1,263 @@
+*************************************************************************************************;
+* 
+*           CLIENT:  ModernaTX, Inc.
+*         PROTOCOL:  mRNA-1273-P201
+*
+*          PURPOSE: Macros used for adam programming
+*      
+*      INPUT FILES: 
+*     OUTPUT FILES:  
+*
+*      USAGE NOTES: 
+*      
+*************************************************************************************************;
+*  Copyright 2020 Pharmaceutical Product Development, Inc.
+*  All Rights Reserved. 
+*************************************************************************************************;
+
+%macro sortdm(dmname, byvar=usubjid, keep=, where=, options=);
+  proc sort data=trans.&dmname out=&dmname(keep=&keep) &options;
+    by &byvar;
+	&where;
+  run;
+%mend sortdm;
+
+%macro numdate(isodate, numdate);
+if not missing(&isodate) then do;
+	if index(&isodate, 'T')>0 then do;
+	 if index(scan(&isodate, 1, 'T'), '----')=0 then
+	 &numdate=input(scan(&isodate, 1, 'T'), YYMMDD10.);
+	end;
+	else do;
+	 if length(&isodate)=10 then &numdate=input(scan(&isodate, 1, 'T'), YYMMDD10.);
+	end;
+end;
+%mend numdate;
+
+%macro numtime(isodate, numtime);
+if not missing(&isodate) then do;
+	if index(&isodate, 'T')>0 and length(scan(&isodate, 2, 'T'))=5 then do;
+	 &numtime=input(scan(&isodate, 2, 'T'), time5.);
+	end;
+end;
+%mend numtime;
+
+**create numeric datetime**;
+%macro numdtm(isodate, numdtm);
+if missing(&isodate) then &numdtm=.;
+if not missing(&isodate) & index(&isodate, 'T')>0 then do;
+	 if length(&isodate)=16 then &numdtm=input(&isodate||':00', e8601dt.);
+	 else if length(&isodate)=19 then &numdtm=input(&isodate, e8601dt.);
+end;
+%mend numdtm;
+
+*create time5 **;
+%macro numtm(isodate, numtme);
+if missing(&isodate) then &numtme=.;
+if not missing(&isodate) then do;
+	if index(&isodate, 'T')>0 then do;
+	 &numtme=input(scan(&isodate, 2, 'T'), time5.);
+	end;
+end;
+%mend numtm;
+
+**merge data with ADSL: RUn before ADaM dataset update.;
+%macro mergeadsl(indat,keep=usubjid subjid,drop=);
+proc sort data = adb.adsl out = adsl(keep =&keep);
+	by usubjid subjid;
+run;
+
+proc sort data = &indat;
+	by usubjid subjid;
+run;
+
+data &indat;
+    merge &indat(in=a) 
+          adsl(in=b keep=&keep drop=&drop);                     
+    by USUBJID SUBJID;
+	if a & b;
+run;
+%mend mergeadsl;
+
+**Create Day variable;
+*Pass the numeric DATE variable as DT;
+%macro calcdy(dt=, dy=, refdt=tr01sdt);
+	if &dt. ne . and &refdt. ne . then do;
+		if &dt.>=&refdt. then &dy. = &dt. - &refdt. +1;
+		else if &dt.<&refdt. then &dy. = &dt. - &refdt.;
+	end;
+%mend;
+
+*** macro to label variables ***;
+%macro label(datain=);
+  %local dsid getvalue getvarname close i ;
+  /* open dataset whose values in the first observation will become new labels */
+  %let dsid=%sysfunc(open(&datain));
+  /* attrn and nvars will return the number of variables in &datain */
+  %do i=1 %to %sysfunc(attrn(&dsid,nvars));
+    /* retrieve each variable name in &datain */
+    %let getvarname=%sysfunc(varname(&dsid,&i));
+    /* fetchobs reads the specified observation from &datain */
+    %let rc=%sysfunc(fetchobs(&dsid,1));
+    /* retrieve the value of each variable */
+    %let getvalue=%qsysfunc(getvarc(&dsid,&i));
+     /* build the syntax for the label statement that will be generated */
+    label &getvarname = "&getvalue";
+  %end;
+  /* close the dataset */
+  %let close=%sysfunc(close(&dsid));
+%mend label;
+
+*** macro to assign variable length ***;
+%macro varlth(datain= );
+  %local dsid getvalue getvarname close i ;
+  /* open dataset whose values in the first observation will become new labels */
+  %let dsid=%sysfunc(open(&datain));
+  /* attrn and nvars will return the number of variables in &datain */
+  %do i=1 %to %sysfunc(attrn(&dsid,nvars));
+    /* retrieve each variable name in &datain */
+    %let getvarname=%sysfunc(varname(&dsid,&i));
+    /* fetchobs reads the specified observation from &datain */
+    %let rc=%sysfunc(fetchobs(&dsid,1));
+    /* retrieve the value of each variable */
+    %let getvalue=%qsysfunc(getvarc(&dsid,&i));
+     /* build the syntax for the label statement that will be generated */
+    length &getvarname  &getvalue;
+  %end;
+  /* close the dataset */
+  %let close=%sysfunc(close(&dsid));
+%mend varlth;
+
+%macro write(dmname, byvar=usubjid, drop=, dlabl=);
+  proc sort data=&dmname(drop= &drop label="&dlabl") out=output.&dmname ;
+    by &byvar ;
+  run;
+  title1 "Client: &g_client";
+  title2 "Protocol: &g_prot";
+  title3 "Dataset: &DMNAME" ;
+  footnote1 "Program:  &sysdate  &systime";
+%mend write;
+
+ 
+*Derive TRTA(N);
+%macro trta(dsname=);
+%global DOSERF;
+%let DOSERF = ;
+	proc sort data = adb.adsl out = adsl 
+	(keep = usubjid tr01sdtm dos2dtm tr01sdt dose2dt 
+	rename = ( tr01sdtm=_tr01sdtm dos2dtm=_dos2dtm tr01sdt =_tr01sdt dose2dt =_dose2dt)
+	) nodupkey;
+		by usubjid;
+	run;
+	
+	proc sort data= trans.EX out = EX_DOSE1
+	(keep = usubjid extrt exdose exdostxt rename = ( extrt=extrt_dose1 exdose = exdose_dose1 exdostxt = exdostxt_dose1)) nodupkey  ;
+		by usubjid exdose;
+		where index(upcase(visit),'DAY 1 ')>0;
+	run;
+	
+	proc sort data= trans.EX out = EX_DOSE2 
+	(keep = usubjid extrt exdose exdostxt rename = ( extrt=extrt_dose2 exdose = exdose_dose2 exdostxt = exdostxt_dose2)) nodupkey  ;
+		by usubjid exdose; 
+		where index(upcase(visit),'DAY 29')>0;
+	run;
+	
+	proc sql noprint;
+		create table chk_dose1 as select distinct	
+			usubjid, extrt_dose1, count(distinct exdose_dose1) as chk_dose1
+			from EX_DOSE1 
+			group by usubjid;
+			
+		create table chk_dose2 as select distinct	
+			usubjid, extrt_dose2, count(distinct exdose_dose2) as chk_dose2
+			from EX_DOSE2 
+			group by usubjid;	
+	quit;
+	
+	data _null_;
+		set chk_dose1;
+		if chk_dose1 > 1 then do;
+			put "alert_C: Subject " USUBJID " has two dose for " extrt_dose1 " Dose 1, please check.";
+		end;
+	run;	
+
+	data _null_;
+		set chk_dose2;
+		if chk_dose2 > 1 then do;
+			put "alert_C: Subject " USUBJID " has two dose for " extrt_dose2 " Dose 1, please check.";
+		end;
+	run;	
+		
+	proc sort data = &dsname. ;
+		by usubjid;
+	run;
+	 
+
+proc sql noprint;
+	select name into: DOSERF 
+	from  dictionary.columns
+	where     upcase(libname)='WORK' and 
+	     (index(upcase(name),'MDOSREF') > 0 or upcase(name)='ATPTREF' ) and 
+	      upcase(memname)  =upcase("&DSNAME.")  ;
+quit;
+
+%if &DOSERF. ne %then %put Alert_I: Dose reference variable %sysfunc(strip(&DOSERF)) used to derive TRTA(N);
+%else %put Alert_I: Using analyis date to derive TRTA(N);
+
+	data &dsname.; 
+	length TRTA _DOSE $50.;
+		merge &dsname. (in=a) EX_DOSE1 EX_DOSE2 adsl;
+		by usubjid;
+		if a;
+		
+		label TRTA  = "Actual Treatment"
+			  TRTAN = "Actual Treatment (N)";
+		
+			
+		%if &DOSERF. ne %Then %do;
+			_DOSE = &DOSERF.;
+		%end;
+		%else %do;
+			*Dose 1;
+			if nmiss(_TR01sdtm , adtm, _dos2dtm) = 0 and _TR01sdtm<=adtm < _dos2dtm then _DOSE = 'Vaccination 1';
+			else if nmiss(_TR01sdtm , adtm) = 0 and _TR01sdtm<=adtm and _dos2dtm = . then _DOSE = 'Vaccination 1';
+			else if nmiss(_TR01sdtm , adtm) ne 0 then do;
+				if nmiss(_TR01sdt , adt, _dose2dt) = 0 and _TR01sdt<=adt < _dose2dt then _DOSE = 'Vaccination 1';
+				else if nmiss(_TR01sdt , adt) = 0 and _TR01sdt<=adt and _dose2dt = . then _DOSE = 'Vaccination 1';
+			end;
+			
+			*Dose 2;
+			if nmiss(adtm, _dos2dtm) = 0 and adtm >= _dos2dtm then _DOSE = 'Vaccination 2';
+			else if nmiss(_dos2dtm , adtm) ne 0 then do;
+				if nmiss(adt, _dose2dt) = 0 and  adt >= _dose2dt then _DOSE = 'Vaccination 2';
+			end;
+		%end;
+		 
+		*Dose 1; 
+		if _DOSE = 'Vaccination 1' then do;
+			     if upcase(extrt_dose1) = 'PLACEBO' then TRTA = 'Placebo';
+			else if index(upcase(extrt_dose1) ,'MRNA-1273'  ) > 0 and 0< exdose_dose1 <=75 then TRTA = 'mRNA-1273 50 ug';
+			else if index(upcase(extrt_dose1) ,'MRNA-1273'  ) > 0 and 75< exdose_dose1    then TRTA = 'mRNA-1273 100 ug';
+			else if index(upcase(extrt_dose1) ,'MRNA-1273'  ) > 0 and strip(exdostxt_dose1) in ('>0-25' '>25-<50' '>50-75') then TRTA = 'mRNA-1273 50 ug';
+			else if index(upcase(extrt_dose1) ,'MRNA-1273'  ) > 0 and strip(compress(exdostxt_dose1)) in ('>75-<100' '>75-100' '>100-125' '>125'  '>125orabove') then TRTA = 'mRNA-1273 100 ug';	
+		end;
+
+		*Dose 2;
+		if _DOSE = 'Vaccination 2' then do;
+			     if upcase(extrt_dose2) = 'PLACEBO' then TRTA = 'Placebo';
+			else if index(upcase(extrt_dose2) ,'MRNA-1273'  ) > 0 and 0< exdose_dose2 <=75 then TRTA = 'mRNA-1273 50 ug';
+			else if index(upcase(extrt_dose2) ,'MRNA-1273'  ) > 0 and 75< exdose_dose2    then TRTA = 'mRNA-1273 100 ug';
+			else if index(upcase(extrt_dose2) ,'MRNA-1273'  ) > 0 and strip(exdostxt_dose2) in ('>0-25' '>25-<50' '>50-75') then TRTA = 'mRNA-1273 50 ug';
+			else if index(upcase(extrt_dose2) ,'MRNA-1273'  ) > 0 and strip(compress(exdostxt_dose2)) in ( '>75-<100' '>75-100' '>100-125' '>125'  '>125orabove') then TRTA = 'mRNA-1273 100 ug';	
+		end;
+
+		
+		
+		if TRTA = 'Placebo' then TRTAN =  1;
+		if TRTA = 'mRNA-1273 50 ug' then TRTAN =  2;
+		if TRTA = 'mRNA-1273 100 ug' then TRTAN =  3;
+		
+		drop extrt_dose2 exdose_dose2 extrt_dose1 exdose_dose1 _:;
+	run;
+	
+%mend trta;

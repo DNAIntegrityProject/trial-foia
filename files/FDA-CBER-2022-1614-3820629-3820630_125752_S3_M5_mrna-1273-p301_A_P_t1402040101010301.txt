@@ -1,0 +1,46 @@
+*************************************************************************************************;
+*        CLIENT:  ModernaTX, Inc.
+*      PROTOCOL:  mRNA-1273-P301
+*       PURPOSE:  Create Table 14.2.4.1.1.1.3.1
+*   INPUT FILES:  ADaM datasets
+*  OUTPUT FILES:  t1402040101010301.rtf
+*   USAGE NOTES:
+*************************************************************************************************;
+*  Copyright 2020 PPD
+*  All Rights Reserved.
+*************************************************************************************************;
+ 
+*Subset Condition;
+%let popfl=PPSIFL;
+%let cohortc= SCOV2BL;
+ 
+ 
+/*ADIS subset*/
+%let where_adis = &popfl.='Y' and  PARCAT1='Serum SARS-CoV-2 Binding Antibodies' and PARAMCD in('S2PIGG','LS2PIGG') and ANL01FL='Y' and EUAVACFL^="Y" and APERIOD=1;
+/*GMT subset*/
+%let sub_gmt = &popfl.='Y' and parcat1='Serum SARS-CoV-2 Binding Antibodies' and PARAMCD in('S2PIGG','LS2PIGG') and ANL01FL='Y' and substr(param,1,5) = 'LOG10' and EUAVACFL^="Y" and APERIOD=1;
+/*Clopper subset*/
+%let sub_clopper= &popfl.='Y' and parcat1='Serum SARS-CoV-2 Binding Antibodies' and PARAMCD in('S2PIGG','LS2PIGG') and ANL01FL='Y' and substr(param,1,5) ne 'LOG10' and EUAVACFL^="Y" and APERIOD=1;
+ 
+ 
+ 
+%include "mt140204010101010x.sas";
+ 
+ 
+*PROC REPORT;
+%macro finalreport;
+/*step1: run addrec,pack,pagebreak,align*/
+%continuetable;
+
+%if %symexist(g_outtype)=0 %then %do; 
+    /*step2: proc report*/
+    %if &pop.^= 0 %then %do;
+    %REPORT_A;
+    %end;
+     
+    %else %if &pop.= 0 %then %do;
+    %REPORT_B;
+    %end;
+%end;
+%mend;
+%finalreport;

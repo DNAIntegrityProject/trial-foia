@@ -1,0 +1,126 @@
+*************************************************************************************************;
+* 
+*           CLIENT:  ModernaTX, Inc.
+*         PROTOCOL:  mRNA-1273-P201
+*
+*          PURPOSE: Create analysis dataset adis
+*      
+*      INPUT FILES: SDTM domains
+*     OUTPUT FILES: adis.sas7bdat
+*
+*      USAGE NOTES: 
+*      
+*************************************************************************************************;
+*  (c) 2020 PPD
+*  All Rights Reserved. 
+*************************************************************************************************;
+
+**Assign global macro variable DSETNAME to reflect the name of the final ADaM dataset**;
+%global DSETNAME;
+%let dsetname = adis;
+%let adslvar=tr01sdt dose2dt tr01sdtm tr01edtm dose1fl dose2fl eosdt dthdt randfl sex;
+
+%include "_adis_vars_.sas";
+ 
+ 
+*per protocol flags: BabAb nAb;
+data pp_listing; 
+	set adb.pp_list; 
+	keep usubjid PVSBABFL PVSNABFL PBABREAS PNABREAS VISITTPT;
+run;
+data pp_listing2; 
+	set adb.pp_list2; 
+	keep usubjid PVSNABFL visittpt ;
+run;
+proc sql noprint;
+	create table adis0 as select distinct
+		a.*, 
+		b.PVSBABFL, b.PVSNABFL, b.PBABREAS ,b.PNABREAS ,
+		c.PPBABFL, c. PPNABFL, c.PPBABERS, c.PPNABERS,
+		d.PVSNABFL as PVSNABFL2, c.PPNAB2FL
+		from final a 
+			left join pp_listing b
+				on a.usubjid = b.usubjid and
+				   a.avisit = b.visittpt 
+			left join adb.adsl c
+					on a.usubjid = c.usubjid
+			left join pp_listing2 d
+				on a.usubjid = d.usubjid and
+				   a.avisit = d.visittpt;
+ quit;
+
+data adis;
+length PPBABRER  PPNABRER $200;
+	set adis0;
+	
+	*antibodies binding flags;
+	if parcat1 = 'Serum SARS-CoV-2 Binding Antibodies'	then do;
+		if PVSBABFL = 'Y' and PPBABFL = 'Y' then PPBABRFL = 'Y';
+		if index(upcase(PPBABERS) ,'DOSING ER') > 0  and strip(PBABREAS) ne '' then PPBABRER = 'Dosing error; '||strip(PBABREAS);
+		else if index(upcase(PPBABERS) ,'DOSING ER') > 0  and strip(PBABREAS) = '' then PPBABRER = 'Dosing error';
+		else PPBABRER = PBABREAS;		
+	end;
+	if parcat1 = 'Serum SARS-CoV-2 Neutralizing Antibodies' then do;
+		if PVSNABFL = 'Y' and PPNABFL = 'Y' then PPNABRFL = 'Y';
+		if PVSNABFL2 = 'Y' and PPNAB2FL = 'Y' then PPNA2RFL = 'Y';
+		if index(upcase(PPNABERS) ,'DOSING ER') > 0  and strip(PNABREAS) ne '' then PPNABRER = 'Dosing error; '||strip(PNABREAS);
+		else if index(upcase(PPNABERS) ,'DOSING ER') > 0 and strip(PNABREAS) = '' then PPNABRER = 'Dosing error';
+		else PPNABRER = PNABREAS;
+	end; 
+	
+	drop _: &adslvar PPBABFL PPNABFL PPBABERS PPNABERS ;
+run;
+ 
+
+**Generate final dataset by updating certain attributes. Optionally merge common variables & create sequence variable as needed**;
+%TRTA(dsname=&DSETNAME);
+
+data &dsetname.;
+	merge &dsetname. (in=a) adb.adsl (in=b keep = usubjid);
+	by usubjid;
+	if a and b;
+run;
+
+proc sort data = &dsetname.;
+ by USUBJID  PARCAT1   PARAMCD  AVISITN  ISDTC ISSEQ;
+run;
+
+
+%adam_dataset_update(
+	ds=&DSETNAME,
+	libin=work,
+	libout=output,
+	adsllib=adb,
+	addcomvar=Y,
+	addseq=,
+	dropinfmt=Y,
+	mapspecfile=&ADAM_SPEC,
+	maploc=&ADAM_SPEC_LOC,
+	debug=N
+	);
+
+%macro dod;
+**Generate Value Level Metadata values for the ad<xx> dataset**;
+% dod_vlm(        
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&G_PROJECTPATH.&G_TOPLEVEL.\Documents\Specs\,
+	specname=&G_NICKNAME._ADaM_Spec.xlsm,
+	debug=N
+	);
+
+**Generate Enhanced Controlled Terminology for the ad<xx> dataset**;
+% dod_enhcd_ct(            
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&G_PROJECTPATH.&G_TOPLEVEL.\Documents\Specs\,
+	specname=&G_NICKNAME._ADaM_Spec.xlsm,
+	map_ct_nm=,
+	map_ct_loc=,
+	debug=N
+	);
+%mend;
+
+ 

@@ -1,0 +1,272 @@
+*************************************************************************************************;
+* 
+*           CLIENT:  ModernaTX, Inc.
+*         PROTOCOL:  mRNA-1273-P301
+*
+*          PURPOSE: Create analysis dataset adsymp
+*      
+*      INPUT FILES: SDTM domains
+*     OUTPUT FILES: ADSYMP.sas7bdat
+*
+*      USAGE NOTES: 
+*      
+*************************************************************************************************;
+*  Copyright 2020 Pharmaceutical Product Development, Inc.
+*  All Rights Reserved. 
+*************************************************************************************************;
+
+options noquotelenmax;
+%include "madam.sas";
+
+**Assign global macro variable DSETNAME to reflect the name of the final ADaM dataset**;
+%global DSETNAME;
+%let dsetname = adsymp;
+%let adslvar=tr01sdt tr01sdtm tr01edt tr01edtm dose2dt dos2dtm EUAVACDT AP02SDT;
+
+**Merge supplemental data onto parent domain**;
+%revsupp(libin=trans,libout=work,ds=vs,supp=suppvs,outds=vs_all);
+%revsupp(libin=trans,libout=work,ds=faef,supp=suppfaef,outds=faef_all);
+
+proc format;
+	invalue catn
+	'COVID-19 SYMPTOM' = 1
+	'COVID-19 SEVERITY' = 2
+	;
+
+	value $ paramcd
+	'Body Aches'='BODYACHE'
+	'Chills'='CHILLS'
+	'Cough'='COUGH'
+	'Diarrhea'='DIARRHEA'
+	'Difficulty Breathing'='DIBREATH'
+	'Fatigue'='FATIGUE'
+	'Headache'='HEADACHE'
+	'Muscle Aches (Myalgia)'='MYALGIA'
+	'Nasal Congestion'='NASALCON'
+	'Nausea'='NAUSEA'
+	'New Loss of Smell'='NLSMELL'
+	'New Loss of Taste'='NLTASTE'
+	'Runny Nose (Rhinorrhea)'='RUNNOSE'
+	'Shortness of Breath'='SHBREATH'
+	'Sore Throat'='STHROAT'
+	'Vomiting'='VOMIT'
+	'O2 Saturation <= 93%'='O2SAT93'
+	'Fever'='FEVER' 
+	'Acute Respiratory Distress Syndrome (ARDS)'='ARDS'  
+	'Acute Renal Dysfunction'='ARDYSF'
+	'Systolic Blood Pressure < 90 mmHg, Diastolic Blood Pressure < 60 mmHg'='S90D60'   
+	'Clinical Evidence of Pneumonia'='CEPNEU'
+	'ECMO'='ECMO'   
+	'Hepatic Dysfunction'='HEPDYSF'
+	'High-Flow Oxygen'='HFOXYGEN'
+	'Admission to an intensive care unit due to SARS-CoV-2'='ICU'
+	'Mechanical Ventilation'='MVENT'
+	'Neurologic Dysfunction'='NEURDYSF'
+	'Non-Invasive Ventilation'='NIVENT'
+	'Radiographical Evidence of Pneumonia'='REPNEU'   
+	'Respiratory Failure'='RF'
+	'Vasopressors Required'='VASOPRES'
+	'Respiratory Rates >= 30 per Minute'='RR30'
+	'Heart Rate >= 125 per Minute'='HR125'
+	'Oxygen Saturation of SpO2 <= 93% on room air at sea level'='OXYGEN93'
+	'PaO2/FIO2 Ratio < 300 mmHg'='PAO2F300'
+	;
+run;
+
+data vs;
+	length param $200.;
+	set vs_all(where=(vsscat='COVID-19' and VSTESTCD in ('OXYSAT', 'TEMP') and vsstat^='NOT DONE'));
+	adt=input(vsdtc, yymmdd10.);
+	aval=vsstresn;
+	avalc='Y';
+	format adt date9.;
+
+	if VSTESTCD='OXYSAT' and .<VSSTRESN<=93 then do;
+		param='O2 Saturation <=93%';
+		output;
+	end;
+	if VSTESTCD='TEMP' and VSSTRESN>=38 and VSSTRESU='C' then do;
+		param='Fever'; 
+		output;
+	end;
+run;
+
+data faef;
+	length param $200. sev $20.;
+	set faef_all(where=(facat='EFFICACY' and fastat^='NOT DONE'));
+	adt=input(fadtc,yymmdd10.);
+	astdt=input(faevdtc,yymmdd10.);
+	aendt=input(faendtc,yymmdd10.);
+	avalc=strip(fastresc);
+	param=strip(faobj);
+	if faobj='Evidence of Shock Requires Vasopressors' then param = 'Vasopressors Required';
+	if faobj='Myalgia' then param = 'Muscle Aches (Myalgia)';
+	if faobj='Rhinorrhea' then param = 'Runny Nose (Rhinorrhea)';
+
+	if FASCAT='COVID-19' and FASTRESC in ('MILD', 'MODERATE', 'SEVERE') then do;
+		avalc='Y';
+		sev=strip(FASTRESC);
+	end;
+	else if FASCAT='COVID-19' and FASTRESC = 'NONE' then avalc='N'; 
+	else if FASCAT='COVID-19 SEVERITY' then avalc=strip(FASTRESC); 
+	stdt=coalesce(astdt,adt);
+run;
+
+data pr;
+	length param $200.;
+	set trans.pr(where=(prcat='EFFICACY' and prstat^='NOT DONE' and proccur^=''));
+	astdt=input(prstdtc,yymmdd10.);
+	aendt=input(prendtc,yymmdd10.);
+	avalc=strip(proccur);
+
+	param=strip(prtrt);
+	if prtrt='HIGH-FLOW OXYGEN' then PARAM='High-Flow Oxygen';
+	else if prtrt='MECHANICAL VENTILATION' then PARAM='Mechanical Ventilation';
+	else if prtrt='NON-INVASIVE VENTILATION' then PARAM = 'Non-Invasive Ventilation'; 
+run;
+
+data ho;
+	length param $200.;
+	set trans.ho;
+	where hocat='EFFICACY' and hoterm='ADMITTED TO ICU' and hooccur^='';
+	adt=input(hodtc,yymmdd10.);
+	astdt=input(hostdtc,yymmdd10.);
+	aendt=input(hoendtc,yymmdd10.);
+	avalc=strip(hooccur);
+	param=strip(hoterm);
+	hoscat='COVID-19 SEVERITY';
+	if hoterm='ADMITTED TO ICU' then param='Admission to an intensive care unit due to SARS-CoV-2';
+	stdt=coalesce(astdt,adt);
+run;
+
+data _all;
+	length avalc $100.; 
+	set vs(in=a) faef(in=b) pr(in=c) ho(in=d);
+
+	if a then raw_adt = adt;
+	else if b then raw_adt = stdt;
+	else if c then raw_adt = astdt;
+	else if d then raw_adt = stdt;
+run;
+
+data all;
+	length parcat1 $50. lnkid $40. atpt $20.;
+	set _all; 	
+	atpt=coalescec(vstpt, fatpt);	
+	parcat1=coalescec(vsscat, prscat, fascat, hoscat);
+	lnkid=coalescec(FASPID, VSSPID, PRLNKID, HOSPID);
+	if parcat1='COVID-19' then parcat1='COVID-19 SYMPTOM';
+	parcat1n=input(parcat1,catn.);
+	param=tranwrd(param,'<=93%','<= 93%');
+	paramcd=put(param,$paramcd.);
+run;
+
+data out1 out2;
+	set all;
+	if vstpt^='' or fatpt^='' then output out1;
+	else output out2;
+run;
+ 
+proc sort data=out1 tagsort;by usubjid paramcd atpt adt;run;
+data out1;
+	set out1;
+	by usubjid paramcd atpt adt;
+	if first.atpt then num=1;
+	else num+1;
+run;
+
+data out1_;
+	set out1;
+	if num>1 then do;
+		avisit='Illness Visit '||strip(put(num,best.));
+		avisitn=100*num;
+	end;
+	else do;
+		avisit='Illness Visit';
+		avisitn=100;
+	end;
+run;
+
+data all_;
+	set out1_ out2;
+run;
+
+proc sort tagsort data=all_; by usubjid; run;
+
+data all2;
+	merge all_(in=a) adb.adsl(in=b keep=USUBJID &adslvar.);
+	by usubjid;
+	if a and b;
+run;
+
+data all3;
+	length AVALC $100. AVISIT $50.;
+	set all2;
+
+	* Period;
+	if .<AP02SDT<=ASTDT or (ASTDT=. and .<AP02SDT<=ADT) then APERIOD = 2;
+	else APERIOD = 1;
+
+	if .<EUAVACDT<ADT then EUAVACFL = 'Y';
+
+	if n(adt,tr01sdt)=2 then ady=adt-tr01sdt+(adt>=tr01sdt);
+	if n(astdt,tr01sdt)=2 then astdy=astdt-tr01sdt+(astdt>=tr01sdt);
+	if n(aendt,tr01sdt)=2 then aendy=aendt-tr01sdt+(aendt>=tr01sdt);
+
+	* Surce Data, Sequence, Variable;
+	SRCDOM = DOMAIN;
+	SRCSEQ = coalesce(VSSEQ, FASEQ, PRSEQ, HOSEQ);
+	if domain='VS' then SRCVAR = 'VSSTRESN'; 
+	else if index(domain, 'FA') then SRCVAR = 'FASTRESC';   
+	else if domain='PR' then SRCVAR = 'PROCCUR'; 
+	else if domain='HO' then SRCVAR = 'HOOCCUR'; 
+run;
+
+proc sort tagsort data=all3;by usubjid parcat1 paramcd avisitn adt srcseq;run;
+data adsymp(drop=subjid);
+	set all3;
+	by USUBJID PARCAT1 PARAMCD AVISITN adt srcseq;
+	ASEQ + 1;
+	if first.usubjid then ASEQ = 1;
+	adtm=.;
+run;
+
+**Generate final dataset by updating certain attributes. Optionally merge common variables & create sequence variable as needed**;
+%trta(dsname=&DSETNAME);
+
+%adam_dataset_update(
+	ds=&DSETNAME,
+	libin=work,
+	libout=output,
+	adsllib=adb,
+	addcomvar=Y,
+	addseq=,
+	dropinfmt=Y,
+	mapspecfile=&ADAM_SPEC,
+	maploc=&ADAM_SPEC_LOC,
+	debug=N
+	);
+	
+	
+**Generate Value Level Metadata values for the ad<xx> dataset**;
+%* dod_vlm(        
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&ADAM_SPEC_LOC,
+	specname=&ADAM_SPEC,
+	debug=N
+	);
+
+**Generate Enhanced Controlled Terminology for the ad<xx> dataset**;
+%* dod_enhcd_ct(            
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&ADAM_SPEC_LOC,
+	specname=&ADAM_SPEC,
+	map_ct_nm=,
+	map_ct_loc=,
+	debug=N
+	);	
+ 

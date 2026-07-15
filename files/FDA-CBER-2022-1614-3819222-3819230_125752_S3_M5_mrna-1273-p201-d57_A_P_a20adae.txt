@@ -1,0 +1,379 @@
+*************************************************************************************************;
+* 
+*           CLIENT:  ModernaTX, Inc.
+*         PROTOCOL:  mRNA-1273-P201
+*
+*          PURPOSE: Create analysis dataset adsl
+*      
+*      INPUT FILES: SDTM domains
+*     OUTPUT FILES: ADAE.sas7bdat
+*
+*      USAGE NOTES: 
+*      
+*************************************************************************************************;
+*  (c) 2020 PPD
+*  All Rights Reserved. 
+*************************************************************************************************;
+
+**Assign global macro variable DSETNAME to reflect the name of the final ADaM dataset**;
+%include "madam.sas";
+
+%global DSETNAME;
+%let dsetname = adae;
+%let adam_spec_loc = &g_projectpath.&g_toplevel.\Documents\Specs;
+%let adam_spec = Moderna mRNA1273P201 ADaM spec.xlsm;
+ 
+proc format;
+	value $ atoxgr (multilabel)
+		'GRADE 1/MILD','1'     = 'Grade 1' 
+		'GRADE 2/MODERATE','2' = 'Grade 2' 
+		'GRADE 3/SEVERE','3'   = 'Grade 3' 
+		'GRADE 4' ,'4'         = 'Grade 4';
+		
+	invalue atoxgrn
+		'GRADE 1/MILD','1'     = 1
+		'GRADE 2/MODERATE','2' = 2
+		'GRADE 3/SEVERE','3'   = 3
+		'GRADE 4' ,'4'         = 4;
+
+	value $ asev 
+		'GRADE 1/MILD','1'     = 'Grade 1/Mild' 
+		'GRADE 2/MODERATE','2' = 'Grade 2/Moderate' 
+		'GRADE 3/SEVERE','3'   = 'Grade 3/Severe' 
+	 	'GRADE 4' ,'4'         = 'Grade 4';
+		
+	invalue asevn
+		'GRADE 1/MILD','1'     = 1
+		'GRADE 2/MODERATE','2' = 2
+		'GRADE 3/SEVERE','3'   = 3
+		'GRADE 4' ,'4'         = 4;
+
+	invalue  aereln 
+		"NOT RELATED"      = 1
+		"RELATED"          = 2
+		"NOT APPLICABLE"   = 3;	
+	
+	picture three
+		low-high= "999"; 
+run;
+
+proc sort data = adb.adsl out =adsl (keep = tr01sdt tr01sdtm TR01edt TR01edtm  DOSE2DT cutoffdt  DOS2DTM  EOSDT usubjid);
+	by usubjid;
+run;
+ 
+%revsupp(
+libin=TRANS, 
+libout=WORK, 
+ds=AE, 
+supp=SUPPAE,
+maploc=&G_PROJECTPATH.\&G_toplevel.\Databases\Transformed,
+mapspec=&G_NICKNAME._mapping_spec.xlsx
+);
+
+%revsupp(
+libin=TRANS, 
+libout=WORK, 
+ds=HO, 
+supp=SUPPHO,
+maploc=&G_PROJECTPATH.\&G_toplevel.\Databases\Transformed,
+mapspec=&G_NICKNAME._mapping_spec.xlsx
+);
+ 
+data ae;
+	set ae;
+	aespid1 = strip(tranwrd(aespid, 'AE-',''));
+run;
+data HO;
+	set HO;
+	hospid1 = strip(tranwrd(hospid, 'HO-',''));
+run;
+
+proc sql noprint;
+	create table  ae1 as select distinct
+		a.*,
+		b.HOSTDTC as AEHSTDTC,
+		b.HOENDTC as AEHENDTC,
+	    strip(c.HOOCCUR) as ICUAD length = 20,
+	    c.HODUR as ICUDAY
+	    from ae a 
+	    	left join HO (where = (upcase(HOTERM)  in ('HOSPITAL'))) b 
+	    		on a.usubjid = b.usubjid and a.aespid1 =  b.hospid1
+		    left join HO (where = (upcase(HOTERM)   in ('ADMITTED TO ICU'))) c 
+	    		on a.usubjid = c.usubjid and a.aespid1 =  c.hospid1 ;
+	   quit;
+	    
+data adae1;
+length TOXGGR1 AREL AEHSTDTC AEHENDTC $20  AESOFL $1.  AEMAFL ASEV $20 lnkpid $200;
+	merge ae1 (in=a rename=(AESOFL = _AESOFL  AEHSTDTC = _AEHSTDTC AEHENDTC = _AEHENDTC AEMAFL=_AEMAFL) where  = (~missing(AETERM) and REMOVEFL ne 'Y'))
+          adsl (in=b);
+	by usubjid;
+	if a and b;
+	
+	*supp vars; 
+	aesofl      = _aesofl; 
+    AEHSTDTC    = _AEHSTDTC;
+    AEHENDTC    = _AEHENDTC;
+	AEMAFL      = _AEMAFL;
+	
+	if length(AEENDTC) >= 10  then AENDT  = input(AEENDTC, yymmdd10.);;
+	if AEENDTC ne ''          then AENDT  = input(AEENDTC, yymmdd10.); 	
+	if length(AEENDTC)=16     then AENDTM = input( AEENDTC ,E8601DT16.);
+	if AENDTM ne .            then AENTM  = timepart(AENDTM);
+
+/*Imputation*/
+/*ASTDT*/
+	if index(aestdtc,'-----') eq 0 then count_AESTDTC = countc(aestdtc, '1234567890');
+	If index(upcase(AESTDTC), 'UNKUNK') > 0 or  index(upcase(AESTDTC), 'UNK') or count_AESTDTC < 8 then do;
+		If count_AESTDTC = 4 then do;
+			ASTDTF = 'M';
+			temp_AESTDTC = compress(AESTDTC, ,'kd');
+			temp_AESTDTN =  input(temp_AESTDTC, best.);
+			yrt = year(tr01sdt);
+			Dayb = '-01-01'; 	
+			if( aendt ne . and aendt > tr01sdt) or aendt = . then do; 
+				if yrt  = yra   then astdt = tr01sdt;
+				else astdt = input( compress(AESTDTC||'-'||strip(DAyb)), yymmdd10.);
+			end;
+		end;
+
+		If count_AESTDTC = 6 then do;
+			ASTDTF = 'D';
+			yra     = input(substr(strip(AESTDTC),1,4), best.);
+			mna     = input(scan(strip(AESTDTC),2,'-'), best.);
+			yrt     = year(tr01sdt);
+			mnt     = month(tr01sdt);
+			Dayb = '01'; 	
+			
+			if( aendt ne . and aendt > tr01sdt) or aendt = . then do; 
+				if yrt  = yra and mnt = mna then do;
+					astdt = tr01sdt;
+					if tr01sdtm ne . then do;
+						asttm = timepart(tr01sdtm);	
+						astdtm = tr01sdtm;
+					end;
+				end;
+				else astdt = input( compress(AESTDTC||'-'||strip(DAyb)), yymmdd10.);
+			end;
+		end;
+	end;
+	else do;
+		ASTDT = input(AESTDTC, yymmdd10.);
+	end;
+	AESTDTC_  =AESTDTC;
+ 	*AE start date and time;
+ 	if ASTDTF ne '' and astdt = tr01sdt and  TR01sdtm ne .  then do;
+ 		AESTDTC_ = strip(put( TR01sdtm ,E8601DT16.));
+ 		ASTTMF = 'H';
+ 	end;
+	if length(AESTDTC_)=16 then ASTDTM = input( AESTDTC_ ,E8601DT16.);
+	if ASTDTM ne . then ASTTM = timepart(ASTDTM);
+	
+	 	*MDOSREF;
+	if index(upcase(AEREFID), 'DOSE 1')>0 then MDOSREF = 'Vaccination 1';
+	if index(upcase(AEREFID), 'DOSE 2')>0 then MDOSREF = 'Vaccination 2';
+ 
+	/*	ASTDY*/
+	if nmiss(ASTDT, tr01sdt) eq 0 then do;
+		if ASTDT < tr01sdt then ASTDY = ASTDT - tr01sdt;
+		else ASTDY = ASTDT - tr01sdt + 1;
+	end;
+
+	/*	AENDY*/
+	if nmiss(AENDT, tr01sdt) eq 0 then do;
+		if AENDT < tr01sdt then AENDY = AENDT - tr01sdt;
+		else AENDY = AENDT - tr01sdt + 1;
+	end;
+	
+*ASTAGE;
+	if TR01edt ne . then enddate = TR01edt + 27;
+	else if tr01sdt ne . then enddate = tr01sdt + 27;
+	if (nmiss(astdtm, tr01sdtm) = 0 and astdtm>= tr01sdtm) or (nmiss(astdt, tr01sdt) = 0 and astdt>= tr01sdt and astdtm = .)  then do;
+		   			
+		if astdt <=enddate then do;
+			ASTAGE  = 'Vaccination stage';
+			ASTAGEN = 1;
+		end; 
+	end;
+	if nmiss(enddate, astdt)  = 0 and astdt >enddate then do;
+			ASTAGE  = 'Follow up stage';
+			ASTAGEN = 2;
+	end;
+	
+	*TRTEMFL;
+	if nmiss(TR01SDTM, ASTDTM) = 0 and TR01SDTM <= ASTDTM then TRTEMFL= 'Y';
+	else if nmiss(TR01SDT, ASTDT) = 0 and TR01SDT <= ASTDT and ASTDTM= . then TRTEMFL= 'Y';
+	
+	if nmiss(TR01SDTM, AENDTM) = 0 and ASTDTM = . and  TR01SDTM <= AENDTM and ASTDT = . then TRTEMFL= 'Y'; 
+	else if nmiss(TR01SDT, AENDT) = 0 and ASTDT= . and  TR01SDT <= AENDT then TRTEMFL= 'Y'; 
+	
+	if TR01SDTM ne . and nmiss(ASTDTM,AENDTM) = 2 and nmiss(ASTDT,AENDT) = 2 then TRTEMFL= 'Y';
+	else if TR01SDT ne . and nmiss(ASTDT,AENDT) = 2 then TRTEMFL= 'Y';
+	
+	*AREL & ARELN;
+	AREL        = AEREL;
+	if AREL = 'NOT RELATED'    then  ARELN =1; 
+	if AREL = 'RELATED'        then  ARELN =2; 
+	if AREL = 'NOT APPLICABLE' then  ARELN =3; 
+	
+	*Toxicity grades;
+	if AETOXGR ne '' then do;
+		ATOXGR  = put(AETOXGR, atoxgr.);
+		ATOXGRN = input(AETOXGR, atoxgrn.);
+		
+		if ATOXGRN < 3 then do;
+			TOXGGR1  = '<3';
+			TOXGGR1N = 1;
+		end;
+		else do;
+			TOXGGR1  = '>=3';
+			TOXGGR1N = 2;	
+		end;
+	end;
+	
+    *Severity; 
+		ASEV  = put(strip(upcase(AETOXGR)), asev.);
+		ASEVN = input(strip(upcase(AETOXGR)), asevn.); 
+	    
+	  *MRDSTDY;	
+	 if MDOSREF = 'Vaccination 1' then do;
+	 	startdtm = tr01sdtm;
+	 	start    = tr01sdt;
+	 end;
+	  if MDOSREF = 'Vaccination 2' then do; 
+	  	startdtm = DOS2DTM ;
+	 	start    = dose2dt;
+	 end;
+ 
+		if nmiss(startdtm, ASTDTM ) = 0 then do;
+			day = (ASTDTM  - startdtm)/(60*60*24) ;
+			if mod(day,1) > 0 then day_overshoot = 1;
+			else day_overshoot = 0;
+			
+			MRDSTDY = int(day) + day_overshoot;
+		    if day <= 1 then MRDSTDY = 1;
+		end;
+		else if nmiss(astdt, start)  =0 then do;
+			if astdt >= start then  MRDSTDY = astdt - start  + 1;
+			else MRDSTDY = astdt - start;
+		end;
+		
+	  *MRDENDY; 
+		if nmiss(startdtm, aendtm ) = 0 then do;
+			day = (aendtm  - startdtm)/(60*60*24) ;
+			if mod(day,1) > 0 then day_overshoot = 1;
+			else day_overshoot = 0;
+			
+			MRDENDY = int(day) + day_overshoot;
+		    if day <= 1 then MRDENDY = 1;
+		end;
+		else if nmiss(aendt, start)  =0 then do;
+			if aendt >= start then  MRDENDY = aendt - start  + 1;
+			else MRDENDY = aendt - start;
+		end;
+		
+	*D28FL;
+	if . < MRDSTDY <=28 then D28FL = 'Y';
+	 
+	
+	*alert for missing ae start date;
+	if aestdtc = '' then do;
+		put 'ALERT_C: missing AE start date value for subject ' USUBJID  ' ' AETERM;
+	end; 
+	*alert for missing ae toxicity grade;
+	if atoxgr = '' then do;
+		put 'ALERT_C: missing toxicity grade for ' USUBJID ' ' AETERM;
+	end; 
+	
+	*ADURN;
+	if strip(AECAT) = 'REACTOGENICITY' and MRDSTDY <= 7 then do;
+		if aendt ne . then enddate = AENDT;
+		else do;
+			if nmiss(cutoffdt, EOSDT) = 0 then Enddate = min(cutoffdt, EOSDT);
+			else if EOSDT ne .     then Enddate = EOSDT;
+			else if cutoffdt  ne . then Enddate = cutoffdt;		
+		end;
+		
+	
+		if MDOSREF = 'Vaccination 1' and nmiss(TR01sdt,enddate) ne 2 and ((enddate - TR01sdt + 1) > 7) then  ADURN  = enddate - TR01sdt-6;
+		if MDOSREF = 'Vaccination 2' and nmiss(DOSE2DT,enddate) ne 2 and ((enddate - DOSE2DT + 1) > 7) then  ADURN  = enddate - DOSE2DT-6;
+	end;
+
+	lnkpid  =  strip(tranwrd(AESPID, 'AE-',''));
+	format _all_;
+	informat _all_;
+	drop tr01sdt tr01sdtm TR01edt TR01edtm  DOSE2DT cutoffdt  EOSDT _: DOS2DTM ;
+run;
+
+
+proc sort data = trans.DS out = DS  ;
+	by usubjid;
+	where index(upcase(dsdecod), 'ADVERSE EVENT') > 0 and DSSCAT = 'END OF STUDY' and DSCAT = 'DISPOSITION EVENT';
+run;
+
+data dsae;
+length lnkpid $200.; 
+	set ds;
+
+	lnkpid  =  strip(tranwrd(DSSPID, 'DS-',''));
+	keep lnkpid usubjid;
+run; 
+
+proc sort data = dsae  ;
+	by usubjid lnkpid;
+run;
+proc sort data = adae1  ;
+	by usubjid lnkpid;
+run;
+
+data &DSETNAME.;
+	merge adae1 dsae (in=a);
+	by usubjid lnkpid;
+	
+	if a then AEDISFL = 'Y';
+run;
+
+%mergeadsl(&DSETNAME.,keep=usubjid subjid );
+%trta(dsname=&DSETNAME);
+
+proc sort data = &DSETNAME  ;
+	by USUBJID  AEBODSYS  AEDECOD AESTDTC   AEENDTC AESEQ;
+run;
+
+**Generate final dataset by updating certain attributes. Optionally merge common variables & create sequence variable as needed**;
+%adam_dataset_update(
+	ds=&DSETNAME,
+	libin=work,
+	libout=output,
+	adsllib=adb,
+	addcomvar=Y,
+	addseq=,
+	dropinfmt=Y,
+	mapspecfile=&ADAM_SPEC,
+	maploc=&ADAM_SPEC_LOC,
+	debug=N
+	);
+	
+	
+%macro dod;
+**Generate Value Level Metadata values for the ad<xx> dataset**;
+% dod_vlm(        
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&G_PROJECTPATH.&G_TOPLEVEL.\Documents\Specs\,
+	specname=&G_NICKNAME._ADaM_Spec.xlsm,
+	debug=N
+	);
+
+**Generate Enhanced Controlled Terminology for the ad<xx> dataset**;
+% dod_enhcd_ct(            
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&G_PROJECTPATH.&G_TOPLEVEL.\Documents\Specs\,
+	specname=&G_NICKNAME._ADaM_Spec.xlsm,
+	map_ct_nm=,
+	map_ct_loc=,
+	debug=N
+	);
+%mend;  

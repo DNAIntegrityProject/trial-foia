@@ -1,0 +1,311 @@
+************************************************************************
+*        CLIENT:  ModernaTX, Inc.
+*      PROTOCOL:  mRNA-1273-P201
+*       PURPOSE:  ARTz AE default
+*   INPUT FILES:   
+*  OUTPUT FILES:   
+*   USAGE NOTES:  
+************************************************************************* 
+*  Copyright 2020 PPD
+*  All Rights Reserved. 
+*************************************************************************;
+
+options nodate;
+options noquotelenmax nonumber;
+
+****** For interactive mode purpose, clear up work library **************;
+/*proc datasets lib = work memtype = data kill; run;*/
+*************************************************************************;
+
+********* DEFINE DEFAULTS **********;
+%include "modmrna1273p201_IA_defaults.sas";
+
+** DEBUG and HELP;
+    %let _default_ae = adae;    
+    %let _default_debug = N;
+    %let _default_help = N;
+
+	** RTF defaults;
+    *ods escape character;
+    %let _default_escapechar  = ^;
+
+    *upcase or lowcase the name of the RTF output file;
+    %let _default_filecase = lowcase;
+
+    ** RTF Template;
+        ** step 4 -- the order of treatments across the page.  If interleaving, separate the pages
+        ** with an exclamation point (!).  For example, to display _default_nested_varstreatments 1, 2 and 3
+        ** on page 1 and treatments 4 5 and 6 on page 2, then set to 1 2 3 ! 4 5 6;
+
+    *** -- call this as needed in TLF programs to change the split character;
+    %*smp_define_display_fmt(prcode_split=$);
+    
+    %let _DEFAULT_BIGN_IN_DATA = WORK.&_default_sub;
+	%let _DEFAULT_TRTVAR      = TRT01AN;
+     
+ 
+
+*** DISPLAY DEFAULTS ***;
+    * text to appear beneath the (N=xx) of the collumn header. For example, n   (%); 
+    %let _DEFAULT_ML_PACK_INDENT  = 2;
+    %let _DEFAULT_ML_PACK_OFFSET  = 1;
+    ** Column 1 Header LABEL - Leave blank to inherit the labels of each level.  
+    ** Otherwise provide text;
+    %let _default_col1_label = ; 
+
+    ** Provide standard text to append to the values of nested variables that
+    ** CONTINUE onto the next page;
+    %let _default_continued_text = %str((cont.));
+
+	 **CUSTOMIZE THE LOOK OF THE COLUMN HEADER;
+        * yes/no trigger to control whether or not to include parentheses -- (N=xx) or N=xx;
+        %let _DEFAULT_TRIGGER_PARENTHESES = Yes; 
+        
+        *Format for BigN;
+        %let _DEFAULT_BIGNFMT = 8.;
+
+*** N_PCNT DEFAULTS;
+        ** format to use for dispaly of percentages in counting tables.  For example, 3.0, 5.1, 6.2...;
+        %let _DEFAULT_OUT_N_PCNT_FORMAT = 5.1;
+        %let _DEFAULT_BLANK_FOR_ZERO_DENOM=yes;
+                
+        %let _default_n_pcnt_display_option = 1;
+                
+        %LET _DEFAULT_NUDGE = 2;
+
+	
+	* Display TOTAL line for levels of summzarization;
+	%let _default_total_line_levels  =  ; 		/* the levels of summarization which will recieve a separate row for Total */
+	%let _default_total_line_text 	 =  ;		/* the text for the Total row */
+	%let _default_total_line_indents =  ;		/* number of spaces the Total row will be indented - leave blank to inherit 
+	                                               the indentation of the next level*/
+	%let _default_total_line_blank_values = ; 
+	%let _default_total_line_offset  = ;		/* number of spaces to indent the wrapped Total line (you will only see this 
+	                                               happen if the total text is long) */
+	%let _default_total_line_indent = ;
+
+
+
+    
+    * Define main/validation side programming flag ;
+    %let validation_yn = N;             /* This is a validation program */
+
+ 
+**** OVERRIDE STUDY LEVEL DEFAULTS ****;
+* if there any changes to the study level defaults that will apply to all the AE tables, 
+* override them here by copying in the definition from the study defaults and resetting the value;
+
+**** DEFINE FORMATS FOR AE TABLES ***;
+	proc format; 
+		
+
+		value $ rel (multilabel)
+		'Related' ,'RELATED'    = 'R'
+		'Not Related', 'NOT RELATED'= 'NR'
+		'Not Applicable' ,'NOT APPLICABLE'= 'NA';
+		
+		value $YN
+	        'Y' = 'Yes'
+        	'N' = 'No';
+        		
+		invalue sevn (multilabel)
+        	'Grade 1/Mild','MILD' =  1
+        	'Grade 2/Moderate','MODERATE' =  2
+        	'Grade 3/Severe',"SEVERE" =  3
+        	'Grade 4/Life-threatening','Grade 4', 'GRADE 4','4'=  4
+        	'Grade 5/Death','DEATH' =  5;    
+		
+		*** create formats as needed -- relationship, action taken....;
+		
+		* for severity down - this exmaple assumes the data will have a numeric severity 
+		* variable where 1=Mild, 2=Moderate and 3=Severe.  Missing values should be imputed 
+		* as needed by the user.  For example, `if severity is missing set to severe` should 
+		* be done at the data set level by the programmer;
+	value sevfmtd 
+		  1 = 'Grade 1'
+		  2 = 'Grade 2'
+		  3 = 'Grade 3'
+		  4 = 'Grade 4'
+		  ;
+
+
+		value sevfmtdo 
+		  0 = 'Overall'		  
+		  ;
+
+		value relfmtdo 
+		  0 = 'Overall'	;
+        
+        value  relfmt  
+		  1 = 'Not Related'
+		  2 = 'Related'
+/*		  0 = 'Overall'*/
+		  ;
+		
+		* For tables showing severity across the page, you may need to define a `total` 
+		* for sorting purposes. In either case, create a format to use for preloadfmt so that 
+		* all records are created for each level of summarization;
+		value sevfmta (multilabel) /*multilabel option allows for the total category to be derived */
+		  1 = 's1'
+		  2 = 's2'
+		  3 = 's3'
+		  1,2,3 = 'st' /* use this category for sorting purposes*/
+		  ;
+
+		* use the codes created by the above format to assign the text to be displayed in the column headers;
+        value $sevdspa 
+		's1' = 'Mild'
+		's2' = 'Moderate'
+		's3' = 'Severe'
+		;
+		
+		value sevfmtd 
+		  1 = 'Mild'
+		  2 = 'Moderate'
+		  3 = 'Severe'		
+		  ;
+
+		** grouped related in the acorss orientation;
+		value relgrpn (multilabel)
+			1 = 'r1'
+			2 = 'r2'
+			3 = 'r3'
+			4 = 'r4'
+			/*1,2,3 = 'rt'  use this category for sorting purposes*/
+		  ;
+		  
+		  value catfmt
+		  	2 = 'Subjects'
+			  	1 = 'Events'
+			  	;
+
+		   invalue socn
+			"Infections and infestations"=1
+			"Neoplasms benign, malignant and unspecified (incl cysts and polyps)"=2
+			"Blood and lymphatic system disorders"=3
+			"Immune system disorders"=4
+			"Endocrine disorders"=5
+			"Metabolism and nutrition disorders"=6
+			"Psychiatric disorders"=7
+			"Nervous system disorders"=8
+			"Eye disorders"=9 
+			"Ear and labyrinth disorders"=10
+			"Cardiac disorders"=11
+			"Vascular disorders"=12
+			"Respiratory, thoracic and mediastinal disorders"=13
+			"Gastrointestinal disorders"=14
+			"Hepatobiliary disorders"=15
+			"Skin and subcutaneous tissue disorders"=16
+			"Musculoskeletal and connective tissue disorders"=17
+			"Renal and urinary disorders"=18
+			"Pregnancy, puerperium and perinatal conditions"=19
+			"Reproductive system and breast disorders"=20
+			"Congenital, familial and genetic disorders"=21
+			"General disorders and administration site conditions"=22
+			"Investigations"=23
+			"Injury, poisoning and procedural complications"=24
+			"Surgical and medical procedures"=25
+			"Social circumstances"=26
+			"Product issues"=27
+			"Uncoded"=28;
+
+        run;
+
+
+
+*** SET UP DATA SETS ***;
+
+	** if any pre-processing is required, do it here.  For example, if all the AE
+	** tables are based on the SAFETY population with a given where condition, do it here.
+	** You can always apply further where clauses later;	
+	* racen and baseline weight not in &_default_ae. - consider whether this code might be better off in the analysis data set;
+
+	
+        data &_default_ae.;
+		    set ADB.&_default_ae.;
+			** the labels that are attached here will be used in the column header of the outputs;
+			label  aebodsys = 'System Organ Class'
+				   aedecod = 'Preferred Term';	
+
+
+			if aebodsys = ' ' then aebodsys = 'Uncoded';
+			if aedecod = ' ' then aedecod = 'Uncoded';
+			socn=input(aebodsys,socn.);
+
+			if AESEV='MILD' then aesevn=1;
+			else if AESEV='MODERATE' then aesevn=2;
+			else if AESEV='SEVERE' then aesevn=3;
+			else if AESEV in ('GRADE 4' '4') then aesevn=4;
+
+        run;
+
+
+		proc sort data=&_default_ae.; by &_DEFAULT_USUBJID.;
+		proc sort data=&_default_sub; by &_DEFAULT_USUBJID. ; run;
+
+		data &_default_ae.;
+			merge &_default_ae.(in=a) &_default_sub(in=b keep=&_DEFAULT_USUBJID. );
+			by &_DEFAULT_USUBJID.;
+			if a;
+		run;
+
+*** AE DEFUALTS ***;
+
+	* Input data set;
+	%let _default_in_data = WORK.&_default_ae.;
+
+	*BigN where clause;
+	%let _default_bign_in_where = SAFFL = 'Y';
+
+	* provide the treatment variable - most of the AE reports will be based on 
+	* the ACTUAL treatment; 
+	
+	**** NESTED COUNTING -- LEVELS OF SUMMARIZATION and SORT ORDERS;
+	* List the VARIABLES for each level of nesting;	
+	%let _default_nested_vars = aebodsys aedecod;
+	
+	* For each level of nesting, list whether that level should be sorted 
+	* ALPHA(betically), or NUM(erically) ;
+	%let _default_nest_vars_sort_order =  num num;
+
+	* For each level of nesting, list whether that level should be sorted 
+	* ASC(ending) or DESC(ending) - most numeric sorts will be descending, 
+	* and most alpha sorts will be ascending;
+	%let _default_nest_vars_sort_asc_desc =  desc desc;
+
+	* For each level of nesting, list the number of spaces for INDENTATIONS;
+	%let _default_nested_vars_indent = 0 2;
+
+	* A constant value to use as the number of spaces to use if the text wraps to the next line;
+	%let _default_nested_vars_offset = 1;
+
+	* Provide the derived variable(s) that will be used for the numeric SORTING.
+	* For example, the root of the names of the variables for the percentages 
+	* derived by the MA_N_PCNT macro is PCNT.  If you want to sort by the percentage
+	* of the total group, use PCNTx, where x represents the code of the total group;
+	%let _default_nest_freq_sort_vars = n_77 ;*defined in each individual program;
+	
+	* Display TOTAL line for levels of summzarization;
+	%let _default_total_line_levels  =  ; 		/* the levels of summarization which will recieve a separate row for Total */
+	%let _default_total_line_text 	 =  ;		/* the text for the Total row */
+	%let _default_total_line_indents =  ;		/* number of spaces the Total row will be indented - leave blank to inherit 
+	                                               the indentation of the next level*/
+	%let _default_total_line_blank_values = ; 
+	%let _default_total_line_offset  = 1 ;		/* number of spaces to indent the wrapped Total line (you will only see this 
+	                                               happen if the total text is long) */
+	%let _default_total_line_indent = ;
+
+*** DISPLAY DEFAULTS ***;
+	* text to appear beneath the (N=xx) of the collumn header. For example, n   (%); 
+
+	** Column 1 Header LABEL - Leave blank to inherit the labels of each level.  
+	** Otherwise provide text;
+	%let _default_col1_label = ; 
+
+	** Provide standard text to append to the values of nested variables that
+	** CONTINUE onto the next page;
+	%let _default_continued_text = %str((cont.));
+	
+	%let display_zero_subject_row=Yes;
+
+	%let _default_nudge = 3;

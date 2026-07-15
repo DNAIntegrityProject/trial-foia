@@ -1,0 +1,138 @@
+*************************************************************************************************;
+* 
+*           CLIENT:  ModernaTX, Inc.
+*         PROTOCOL:  mRNA-1273-P201
+*
+*          PURPOSE: Create analysis dataset adsl-Screen Failures
+*      
+*      INPUT FILES: SDTM domains
+*     OUTPUT FILES: ADSLSF.sas7bdat
+*
+*      USAGE NOTES: 
+*      
+*************************************************************************************************;
+*  (c) 2020 PPD
+*  All Rights Reserved. 
+*************************************************************************************************;
+
+proc datasets mt=data lib=work kill nolist; 
+quit; 
+dm 'clear log; clear output';
+
+%include 'madam.sas';
+%*let adam_spec = Moderna mRNA1273P201 ADaM spec.xlsm;
+**Assign global macro variable DSETNAME to reflect the name of the final ADaM dataset**;
+
+**Merge supplemental data onto parent domain**;
+%revsupp(libin=trans, libout=work, ds=dm, supp=suppdm, outds=dm);
+%revsupp(libin=trans, libout=work, ds=ds, supp=suppds, outds=ds);
+%revsupp(libin=trans, libout=work, ds=rp, supp=supprp, outds=rp);
+
+PROC SORT DATA=DS OUT=DSLASTDT; BY USUBJID DESCENDING DSSTDTC; RUN;
+PROC SORT DATA=DSLASTDT(KEEP=USUBJID DSSTDTC) NODUPKEY; BY USUBJID; RUN;
+PROC SORT DATA=DS ; BY USUBJID DSSTDTC; RUN;
+
+DATA DSLAST;
+	merge ds dslastdt(in=a);
+	by usubjid dsstdtc;
+	if a;
+run;
+PROC SORT DATA=DS OUT=DSDATE(KEEP=USUBJID DSSTDTC rename=(dsstdtc=initdtc)) NODUPKEY; BY USUBJID; RUN;
+
+PROC SORT DATA=DSLAST(where=(DSCAT = 'DISPOSITION EVENT')); BY USUBJID DESCENDING DSSEQ; RUN;
+PROC SORT DATA=DSLAST(where=(DSSCAT = 'SCREEN FAILURE' or ENROLLYN = 'N')) OUT=DS1 NODUPKEY; BY USUBJID; RUN;
+
+DATA DS1DATE;
+	merge dsdate ds1(in=a);
+	by usubjid;
+	if a;
+	if substr(compress(usubjid,'-'),13,9) ne subjid and initdtc = dsstdtc then PUT "ALERT_C: Subject to be included since DSSTDTC of prev subjid and current subjid are the same " usubjid= subjid= dsstdtc= initdtc=;
+	if substr(compress(usubjid,'-'),13,9) ne subjid and initdtc = dsstdtc then subjid = substr(compress(usubjid,'-'),13,9);
+
+run;
+data ds2(keep=subjid scfreas scfreasp); 
+length SCFREAS SCFREASP $200;
+	set ds1date; 
+	if upcase(DSCAT)="DISPOSITION EVENT" and upcase(EPOCH)='SCREENING' and upcase(DSDECOD) ne 'OTHER' then SCFREAS = strip(propcase(dsterm));
+	else if upcase(DSCAT)="DISPOSITION EVENT" and upcase(EPOCH)='SCREENING' and upcase(DSDECOD) eq 'OTHER' then SCFREAS = 'Other';
+	if upcase(scfreas) = "OTHER" then SCFREASP = strip(dsterm);
+run;
+data DM2;
+	length PROTVER $25. PREVSCR $1.;
+	set dm(rename=(protver = protver_ prevscr = prevscr_));
+	if RFICDTC ne '' then RFICDT = input(scan(RFICDTC,1,"T"),yymmdd10.);
+	PROTVER = PROTVER_;
+    PREVSCR = PREVSCR_;
+	* Race Specify;
+		if cmiss(raceoth,mulrace)<2 then RACESPY = catx(' ',raceoth,mulrace);
+RUN;
+ 
+proc sort data= dm2;
+	by usubjid;
+run;
+
+proc sort data=rp(where=(visitnum =1));
+	by usubjid;
+run;
+
+data dm3;
+	length CHILDBP $10. CBNRS $200;
+	merge dm2(in=a) rp(keep=usubjid rptestcd rporres cbrsn );
+	by usubjid;
+	if a;
+	if RPTESTCD = 'CHILDPOT' then CHILDBP = RPORRES;
+	CBNRS = CBRSN;
+run;
+
+proc sort data= dm3;
+	by subjid;
+run;
+
+proc sort data= ds2;
+	by subjid;
+run;
+
+data adslsf;
+	merge dm3(in=a) ds2(in=b);
+	by subjid;
+	if a and b;
+
+run;
+
+**Generate final dataset by updating certain attributes. Optionally merge common variables & create sequence variable as needed**;
+%adam_dataset_update(
+	ds=ADSLSF,
+	libin=work,
+	libout=output,
+	adsllib=adb,
+	addcomvar=N,
+	addseq=,
+	dropinfmt=Y,
+	mapspecfile=&adam_spec.,
+	maploc=&G_PROJECTPATH.&G_TOPLEVEL.\Documents\Specs\,
+	debug=Y
+	);
+
+%macro dod;
+**Generate Value Level Metadata values for the ad<xx> dataset**;
+% dod_vlm(        
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&G_PROJECTPATH.&G_TOPLEVEL.\Documents\Specs\,
+	specname=&ADAM_SPEC,
+	debug=N
+	);
+
+**Generate Enhanced Controlled Terminology for the ad<xx> dataset**;
+% dod_enhcd_ct(            
+	type=ADAM,               
+	selmems=&DSETNAME,
+	excmems=,
+	specloc=&G_PROJECTPATH.&G_TOPLEVEL.\Documents\Specs\,
+	specname=&ADAM_SPEC,
+	map_ct_nm=,
+	map_ct_loc=,
+	debug=N
+	);
+%mend;

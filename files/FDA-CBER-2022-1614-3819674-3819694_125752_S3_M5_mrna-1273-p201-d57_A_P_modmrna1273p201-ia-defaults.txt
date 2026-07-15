@@ -1,0 +1,878 @@
+************************************************************************
+*        CLIENT:  ModernaTX, Inc.
+*      PROTOCOL:  mRNA-1273-P201
+*       PURPOSE:  ARTz default
+*   INPUT FILES:   
+*  OUTPUT FILES:   
+*   USAGE NOTES:  
+************************************************************************* 
+*  Copyright 2020 PPD
+*  All Rights Reserved. 
+*************************************************************************;
+
+options nodate;
+options noquotelenmax nonumber validvarname = UPCASE;
+
+****** For interactive mode purpose, clear up work library **************;
+/*proc datasets lib = work memtype = data kill; run;*/
+*************************************************************************; 
+%global _default_tf g_footer _default_footfmt _default_table_type _default_font_size _default_write_titles _default_write_footnotes
+        _default_globaltfs _default_hanging_indent _default_style _default_ods_options _default_orientation _default_justification
+        _default_embed_footnotes _default_comp_footfmt _default_template_style get_tf_id TF_extract default_spanning_header 
+        _DEFAULT_DEFINE_TOTAL_GROUPS _default_interleave_trt_sequence _default_span_col_header_uline _default_span_col_header_ststp 
+        _default_Footnote_overline;;
+        
+********* DEFINE DEFAULTS **********;
+ %let _default_sub = adsl;
+** DEBUG and HELP;
+    %let _default_debug = N;
+    %let _default_help = N;
+	** RTF defaults;
+    *ods escape character;
+    %let _default_escapechar  = ^;
+    *upcase or lowcase the name of the RTF output file;
+    %let _default_filecase = lowcase;
+    ** RTF Template;
+    * width and length are dependent on the RTF template - for instructions on
+    * how to calculate these dimensions, see smp_caluculate_char_lines.sas;
+    ** Post-text template - call again within program to override;
+    
+   %include "&G_PROJECTPATH.&G_TOPLEVEL\Tools\mu_rtf_template.sas";      
+     
+    %let span_col_header_uline_width = 28;
+    %let span_col_header_uline_spacing = 130;
+    
+    %macro mwParameters();    
+    	     **IN TEXT***;	     
+    	     %if &G_OUTTYPE=INTEXT %then %do;   
+    	        %mu_rtf_template 
+	                     (papersize='LETTER' 
+	                     , orientation=landscape 
+	                     , font=Times New Roman 
+	                     , fontsize=10 
+			     , titlefontsize = 12
+	                     , fontstyle=bold  
+	                     , leftmargin='1.25in' 
+	                     , rightmargin='1in' 
+	                     , topmargin='1in' 
+	                     , bottommargin='1in' 
+	                     , style=INTEXT 
+            ) *; 
+            
+               %let _default_template_style = INTEXT; 
+    	       %let _default_page_length_lines=80;
+    	       %let _default_col1_width_pcnt=50;
+    	     
+    	       ** MA_N_PCNT PARAMETERS;
+    	       %let _default_trigger_tight_paren = yes;
+    	       %let _default_trigger_pcnt_sign = no;
+    	     
+    	       ** MR_SENTENCE_CASE Parameters; 
+    	        %let _default_footfmt=%str($vftfmt.);
+    	     	
+    	       ** MR_PACK PARAMETERS;
+    	       %let _default_table_type=I;
+    	       %let _default_font_size=10;
+    	       
+    	       ** GET_TF PARAMETERS;    	       
+	        /*identifier in TF_EXTRACT.tf*/
+	       %LET TF_extract=%str(&g_projectpath.&g_toplevel.\Tools\mw_extract_updated.tf); 
+    	       %let _default_globaltfs=no;
+    	       %let _default_write_titles=yes;
+    	       %let _default_write_footnotes=no;
+    	       %let _default_hanging_indent=no;
+    	     
+    	       ** MR_ODSOUT Parameters;
+    	       %let _default_ods_options=%str(nogtitle nogfoot bodytitle);
+    	     
+    	       ** MR_REPORT_BASIC Parameters;
+    	       %let _default_justification=JUST=C ;
+    	       %let _default_embed_footnotes=yes;
+    	       %let _default_Footnote_overline =yes;
+    	         
+    	       ** PostToInTextComp Parameters;
+    	       %*let _DEFAULT_COMP_FOOTFMT=%str($vftfmt.);
+    	       
+    	       ** G_FOOTER ;
+    	       %let g_footer=[&g_pgmname..rtf] [&G_FULLPATH.&g_pgmname..sas] Executed: &sysdate9, &systime;;
+    	      
+    	     %end;
+    	     %else %do;
+    	     **POST TEXT***;
+            %mu_rtf_template
+             (papersize='LETTER'
+	    , orientation=landscape
+	    , font=Courier New
+	    , fontsize=9
+	    , leftmargin='1in'
+	    , rightmargin='1in'
+	    , topmargin='1in'
+	    , bottommargin='1in'
+	    , style=tlout
+	    ) *;
+    	       ** MR_PACK PARAMETERS;    	       
+    	       %let _default_template_style = tlout;
+    	       %let _default_table_type=P;
+    	       %let _default_font_size=9;
+    	     
+    	       ** GET_TF PARAMETERS;
+	       %LET TF_extract=%str(&g_projectpath.&g_toplevel.\Tools\TF_Extract.tf); 
+    	       %let _default_globaltfs=yes;
+    	       %let _default_write_titles=yes;
+    	       %let _default_write_footnotes=yes;
+    	       %let _default_hanging_indent=yes;
+    	     
+    	       ** MR_ODSOUT Parameters;
+    	       %let _default_ods_options=;
+    	       %let _default_orientation=landscape;
+    	     
+    	     
+    	       ** MR_REPORT_BASIC Parameters;
+    	       ** Per Wiki documentation the justification will inherit from style template when left null;
+    	       %let _default_justification= ;
+    	       %let _default_embed_footnotes=no;
+    	       %let _default_Footnote_overline =yes; 
+    	     %end;      
+	     %mend mwParameters;
+	      %mwParameters();  
+	      
+	    *** Page size;
+     *the number of lines that fit on the report including titles, footnotes, headers, and body;
+    %let _DEFAULT_PAGE_LENGTH_LINES = 44;
+    *how many characters that can fit onto one line of your rtf file;
+    %let _DEFAULT_PAGE_WIDTH_CHARS = 118;
+        %let _DEFAULT_SKIP_LINE_CELL_HEIGHT = 1.3ex;
+
+	*** DISPLAY DEFAULTS ***;
+    ** Column 1 WIDTH - provide percentage of the page that column 1 will use; 
+
+	** TOTAL/SUBTOTAL GROUPS ****;
+        * step 1 -- define the total and/or subtotals as list-of-codes = new-code
+        * if there is more than one total or subtotal, separate the assignments with 
+        * an exclamation point.  For example, if there are three arms in the study and 
+        * you need to produce a subtotal of treatments 1 and 2 and a total of 1 2 and 3
+        * then use 1 2 = 4 ! 1 2 3 = 5.  If you are using letters as your codes, be sure 
+        * to use quotation marks ;
+
+        * step 2 -- define a format that will be used by proc means/preloadfmt to
+        * `dummy` out the treatment groups if needed.  This is a simple one-to-one
+        * assignment of the treatment groups including the total/subtotals defined above;
+       
+         %LET _DEFAULT_NUDGE = 2;
+	 %let _DEFAULT_COL1_WIDTH_PCNT=40;	
+    	%let _default_prcode_split = $;	
+    	
+             	    proc format;
+             	    *** for INTEXT tables ***;
+	            value $vftfmt 
+	            	"[1]"="&_DEFAULT_ESCAPECHAR.R/RTF'{\super a \i0}'"
+	            	"[2]"="&_DEFAULT_ESCAPECHAR.R/RTF'{\super b \i0}'"
+	            	"[3]"="&_DEFAULT_ESCAPECHAR.R/RTF'{\super c \i0}'"
+	            	"[4]"="&_DEFAULT_ESCAPECHAR.R/RTF'{\super d \i0}'"
+	            	"[5]"="&_DEFAULT_ESCAPECHAR.R/RTF'{\super e \i0}'"
+			"[6]"="&_DEFAULT_ESCAPECHAR.R/RTF'{\super f \i0}'"
+			"[7]"="&_DEFAULT_ESCAPECHAR.R/RTF'{\super g \i0}'"
+	            	"[8]"="&_DEFAULT_ESCAPECHAR.R/RTF'{\super h \i0}'"
+	            	;
+	            	
+             	    ** format with splits;
+             	    value trtpl
+					1  = '1'
+					2  = '2'
+					3  = '3'
+					4  = '4'
+					5  = '5'
+					6  = '6'
+					7  = '7'
+					8  = '8' 
+					9  = '9' 
+					70 = '70'
+					77 = '77'
+					80 = '80'
+					88 = '88'
+					90 = '90'
+					99 = '99' ; 
+			               
+	    	    value cohort
+	   	 	    1	= "Cohort 1 (Age >= 18 and age < 55)"
+	   		    2	= "Cohort 2 (Age >= 55)"  
+	   		    99  = "Missing";	
+	   		     
+	   		    value  cohorttrt
+	   	 	    4	= "Cohort 1 (Age >= 18 and age < 55); Vaccination Group: Placebo"
+	   		    5	= "Cohort 1 (Age >= 18 and age < 55); Vaccination Group: mRNA-1273 50 µg" 
+	   		    6   = "Cohort 1 (Age >= 18 and age < 55); Vaccination Group: mRNA-1273 100 µg"
+	   		    7   = "Cohort 2 (Age >= 55); Vaccination Group: Placebo"  
+	   		    8   = "Cohort 2 (Age >= 55); Vaccination Group: mRNA-1273 50 µg" 
+	   		    9   = "Cohort 2 (Age >= 55); Vaccination Group: mRNA-1273 100 µg"  
+	   		    ;	 
+	   		    
+	   			value cohortn
+	   			1 = '1'
+	   			2 = '2' 
+	   			99 = '99';
+	   			
+	   			value $ trtdsp (multilabel)
+	   			'1' ,'4', '7' = 'Placebo' 
+				'2' ,'5', '8' = "50 µg" 
+				'3', '6', '9'  = "100 µg"  
+     				'77','88','99' = "Total" 
+				'70','80','90'= 'Overall' ;
+				
+				value $ trtdsp_ (multilabel)
+	   			'1', '4', '7' = 'Placebo' 
+				'2' ,'5', '8' = "mRNA-1273 50 µg"
+				'3', '6', '9'  = "mRNA-1273 100 µg" 
+     				'77','88','99' = "mRNA-1273 Total" 
+				'70', '80','90'= 'Overall' ;
+	    run;
+	    	        
+ 
+    * step 2 -- define a format that will be used by proc means/preloadfmt to
+    * `dummy` out the treatment groups if needed.  This is a simple one-to-one
+    * assignment of the treatment groups including the total/subtotals defined above;
+
+    %let _DEFAULT_TRTVAR_PRELOADFMT = TRTPL.;
+ 
+	
+    * step 3 -- define a format used to create the column header macros -- that is, 
+    * how the treatments will be displayed in the reports.  Note that this format will 
+    * always be character;
+    *** define the treatment display with embedded proc report splits
+    *** -- edit smp_define_display_fmt to suit your study;
+
+	 
+	
+    %let _DEFAULT_DISPLAY_FMT = $trtdsp.;  
+	%let _DEFAULT_TRTVAR      = TRT01AN;
+	%let _DEFAULT_AGE_COHORT  = OVRCOHORTN;	 
+	
+        ** step 4 -- the order of treatments across the page.  If interleaving, separate the pages
+        ** with an exclamation point (!).  For example, to display treatments 1, 2 and 3
+        ** on page 1 and treatments 4 5 and 6 on page 2, then set to 1 2 3 ! 4 5 6;
+      
+        
+	    *** -- call this as needed in TLF programs to change the split character;
+        %*smp_define_display_fmt(prcode_split=$);
+    
+*** BIGN DEFAULTS ****;
+    * If you have to do any standard manipulation to the dataset to be used 
+    * for big Ns, then do so here. ;
+    * For exmaple, the ADSL data did not include the SAMFL flag, 
+    * it must be merged in from ADEX;
+
+***BIGN dataset for ***;
+    data &_default_sub. ;
+	 set adb.&_default_sub.;
+	 TRTAN = TRT01AN;
+	 TRTPN = TRT01PN;
+     run;
+
+	%macro process_indata(out_data = , in_data=, bigndata=, trtvar=&_default_trtvar., type=);
+		%macro trtcohort(indata=, outdata = );
+		data &outdata.;
+			set	&indata. (in=notovr)
+			%if %upcase(&TYPE.) = TABLE	%then %do;
+				 &indata. (in=ovr);
+				 %put alert_I: Outputting Overall Cohort for &outdata.;
+			
+				if ovr then OVRCOHORTN = 99; 
+				
+				if OVRCOHORTN  = 99 and &trtvar. = 1 then TRTVARN = 1;
+				if OVRCOHORTN  = 99 and &trtvar. = 2 then TRTVARN = 2;
+				if OVRCOHORTN  = 99 and &trtvar. = 3 then TRTVARN = 3;
+			%end;
+			;
+			
+			if notovr then OVRCOHORTN = AGEGR1N;
+			
+			if OVRCOHORTN  = 1 and &trtvar. = 1 then TRTVARN = 4;
+			if OVRCOHORTN  = 1 and &trtvar. = 2 then TRTVARN = 5;
+			if OVRCOHORTN  = 1 and &trtvar. = 3 then TRTVARN = 6;
+			if OVRCOHORTN  = 2 and &trtvar. = 1 then TRTVARN = 7;
+			if OVRCOHORTN  = 2 and &trtvar. = 2 then TRTVARN = 8;
+			if OVRCOHORTN  = 2 and &trtvar. = 3 then TRTVARN = 9;	
+		run;
+		%mend;
+		
+		%if &type = LISTING %then %do;
+			%let _DEFAULT_DISPLAY_FMT = cohorttrt.;
+		%end;
+		%trtcohort(outdata=&_default_sub., indata=&_default_sub.);
+		%trtcohort(outdata=&out_data., indata=&in_data.);
+		
+		%put alert_I: Overwriting &_default_trtvar with TRTVARN;		
+		%let _default_trtvar = TRTVARN;
+	%mend;
+	
+	*sample call;
+	%*process_indata(out_data=adae, in_data=adb.adae, bigndata=, trtvar=&_default_trtvar., type=table);
+	%*process_indata(out_data=adae, in_data=adb.adae, bigndata=, trtvar=&_default_trtvar., type=listing);
+	%*process_indata(out_data=adae, in_data=adb.adae, bigndata=, trtvar=&_default_trtvar., type=figure);
+
+
+	%let _default_spanning_header = Overall ! Cohort 1 (Age >= 18 and age < 55) ! Cohort 2 (Age >= 55); 
+	%macro Header(Type=/*A or B*/);
+		%if &Type. = A %then %do;
+			%let _DEFAULT_DEFINE_TOTAL_GROUPS = 2 3 = 77 ! 5 6 = 88 ! 8 9 = 99;  
+			%let _default_interleave_trt_sequence = 1 2 3 77 ! 4 5 6 88  7 8 9 99  ; 
+			%let _default_span_col_header_uline = Y ! Y ! Y;
+			%let _default_span_col_header_ststp = 1 77 ! 4 88 ! 7 99;
+		%end;
+		%if &Type. = B %then %do;
+	      		%let _DEFAULT_DEFINE_TOTAL_GROUPS = 1 2 3 = 70 ! 2 3 = 77  !  4 5 6 = 80! 5 6 = 88 !  7 8 9 = 90 ! 8 9 = 99  ;  
+	       		%let _default_interleave_trt_sequence =   1 2 3 77 70 ! 4 5 6 88 80 7 8 9 99 90 ; 
+	       		%let _default_span_col_header_uline = Y ! Y ! Y;
+			%let _default_span_col_header_ststp = 1 70 ! 4 80 ! 7 90;
+		%end;  
+		%put Alert_I: Header= &Type.;
+		%put Alert_I: _DEFAULT_DEFINE_TOTAL_GROUPS= &_DEFAULT_DEFINE_TOTAL_GROUPS.;
+		%put Alert_I: _default_interleave_trt_sequence= &_default_interleave_trt_sequence.;	
+	%mend;
+	*sample call;
+	%*Header(Type=/*A or B*/);
+	
+    %let _DEFAULT_BIGN_IN_DATA = &_default_sub.;
+    *UNIQUE SUBJECT IDENTIFIER;
+    %let _DEFAULT_USUBJID = SUBJID;
+    
+    **CUSTOMIZE THE LOOK OF THE COLUMN HEADER;
+    * yes/no trigger to control whether or not to include parentheses -- (N=xx) or N=xx;
+    %let _DEFAULT_TRIGGER_PARENTHESES = Yes; 
+    *Format for BigN;
+    %let _DEFAULT_BIGNFMT = comma8.;
+	*** N_PCNT DEFAULTS;
+    ** format to use for dispaly of percentages in counting tables.  For example, 4.1, 5.2...;
+    %let _DEFAULT_OUT_N_PCNT_FORMAT = pcnt.;
+    %let _DEFAULT_BLANK_FOR_ZERO_DENOM=yes;       
+    %LET _DEFAULT_TRIGGER_TIGHT_PAREN = YES;
+    %LET _DEFAULT_TRIGGER_N_SPACE_PCNT = NO;
+    %LET _DEFAULT_TRIGGER_PCNT_SIGN = NO;
+    %let _DEFAULT_BIGN_IN_DATA = WORK.&_default_sub;
+*** DISPLAY DEFAULTS ***;
+	** text for displays with no subjects;
+	
+	%let _DEFAULT_NO_SUBJECTS_TABLE = There are no observations for this table.;
+    	%let _default_no_subjects_listing = There are no observations for this listing.;
+        %let _default_no_subjects_figure = There are no observations for this figure.;  
+        %let _DEFAULT_NO_SUBJECTS_SUBSET = There are no observations for this section.;
+       %let _default_no_subjects_section= There are no observations for this section.;
+       
+    * text to appear beneath the (N=xx) of the collumn header. For example, n   (%);
+    %let _default_below_bign = n (%%);
+    ** Column 1 Header LABEL - Leave blank to inherit the labels of each level.  
+    ** Otherwise provide text;
+    %let _default_col1_label = ; 
+    ** Provide standard text to append to the values of nested variables that
+    ** CONTINUE onto the next page;
+    %let _default_continued_text = %str((cont.));
+	 **CUSTOMIZE THE LOOK OF THE COLUMN HEADER;
+        * yes/no trigger to control whether or not to include parentheses -- (N=xx) or N=xx;
+    %let _DEFAULT_TRIGGER_PARENTHESES = Yes;  
+        *Format for BigN;
+    %let _DEFAULT_BIGNFMT = 8.;
+
+*** N_PCNT DEFAULTS;
+        ** format to use for dispaly of percentages in counting tables.  For example, 3.0, 5.1, 6.2...;
+        %let _DEFAULT_BLANK_FOR_ZERO_DENOM=yes;
+                
+        * n_pcnt_display_option:
+        *       OPTION 0:  n
+        *       OPTION 1:  n (x.xx[%])
+        *       OPTION 2:  n/N (x.xx[%])
+        *       OPTION 3:  n (x.xx[%]) [xx]
+        *       OPTION 4:  n/N (x.xx[%]) [xx]
+        **;
+        %let _default_n_pcnt_display_option = 1;
+                
+        
+
+	
+	* Display TOTAL line for levels of summzarization;
+	%let _default_total_line_levels  =  ; 		/* the levels of summarization which will recieve a separate row for Total */
+	%let _default_total_line_text 	 =  ;		/* the text for the Total row */
+	%let _default_total_line_indents =  ;		/* number of spaces the Total row will be indented - leave blank to inherit 
+	                                               the indentation of the next level*/
+	%let _default_total_line_blank_values = ; 
+	%let _default_total_line_offset  = ;		/* number of spaces to indent the wrapped Total line (you will only see this 
+	                                               happen if the total text is long) */
+	%let _default_total_line_indent = ;
+
+
+
+	*** SUMMARY STATS DEFAULTS;
+   * STATISTICS;
+   * If any additional stats other than n, Mean, SD, Median, Min and Max, ;
+   * and which can be produced by PROC MEANS, are required in the majority of your tables, ;
+   * then enter them here.  Also make sure to update formats ($VSTATF and $HSTATF) below for these additional stats. ;
+   %let _DEFAULT_SUMM_STATS_ADDITIONAL = ;
+
+
+    *VERTICAL DISPLAYS;
+        *FORMATS;
+        proc format;
+            * The variables listed in the ANALYSIS_VARS parameter of MA_SUMM_STATS will be treated as subcategories ;
+            * beneath each treatment.  Create a format to label each of the variables in the order in which they ;
+            * will appear in that parameter.  That is also the order they will appear in the output;
+            value Vact_cfb
+            1 = "Observed Value &_default_prcode_split.At Visit"
+            2 = "Change From&_default_prcode_split.Baseline"
+            ; 
+            value Vbac
+            1 = "Baseline&_default_prcode_split.Value"
+            2 = "Actual&_default_prcode_split.Value"
+            3 = "Change From&_default_prcode_split.Baseline [1]"
+            ;
+            
+            
+            * NOTSORTED format to control the order of the statistics procduced;
+            * This format will also control the stat_label in the output;
+            * If additional stats are requested above, be sure to include them in this format;
+            value $Vstatf (NOTSORTED)
+            'N'     = 'n'
+            'MSTD'  = 'Mean (SD)'
+            'MED'   = 'Median'
+            'MINMAX'= 'Min, Max'
+            ;
+        run;
+        
+        * CATEGORY SEQUENCE - The variables listed in the ANALYSIS_VARS parameter of MA_SUMM_STATS will be treated as subcategories ;
+        * beneath each treatment.  Tell MR_REPORT_BASIC the sequence  in which to display them beneath each treatment;
+        * The numbers here should match the start values in the Vact_cfb/Vbac format above.;
+        %let _CAT_SEQUENCE_V = 1 2 ;  /* categories are actual and cfb */
+        * the character used as a separator in compound variables MINMAX, Q1Q3, P10P90 and LCLMUCLM;
+        %let _DEFAULT_SUMM_STAT_SEP = %str(,);
+
+
+    *HORIZONTAL DISPLAYS;
+        ****CUSTOMIZE THE LOOK OF THE TREATMENT ROWS IN HORIZONTAL SUMMARY STATS TABLES;
+        * The macro variable _DEFAULT_TRIGGER_PARENTHESES is defined in the BIGN section above.;
+        * It is also used with this group of options;
+        
+        * Control whether to put extra spaces before BIG N counts to align them from left.;
+        %let _DEFAULT_TRIGGER_L_ALIGN_BIGN = YES; 
+        * Control whether to right align BIG N counts in label column.;
+        %let _DEFAULT_TRIGGER_R_ALIGN_BIGN = YES; 
+
+        *FORMATS;
+        proc format;   
+             value pcnt
+                low - <0.1 = "<0.1"
+                0.1 - <99.95 = [5.1]
+		99.95-<100   =">99"
+                100 = "100"
+                ;
+            * the Actual and CFB are in the position usually reserved for the treatment with the statistics appearing beneath them;
+            value $Hact_cfb
+            '1' = "Actual Value"
+            '2' = "Change From Baseline [1]"
+            ;
+            * NOTSORTED format to control the order of the statistics procduced;
+            * For Horizontal displays, this will control the ordinal designation of the statistics produced;
+            * the statistics columns are treated as subcategories beneath either the actual or CFB heading;
+            value $Hstatf (NOTSORTED)
+            'N'     = 'N'     /* 1 */
+            'MEAN'  = 'MEAN'  /* 2 */
+            'STD'   = 'STD'   /* 3 */
+            'MED'   = 'MED'   /* 4 */
+            'MIN'   = 'MIN'   /* 5 */
+            'MAX'   = 'MAX'   /* 6 */
+            ;
+            * Statistic column header labels for Horizontal display;;
+            * If Change from Baseline is to be displayed, this will need to be a numeric format (treated as subcategory);
+            value stathead
+            1 = 'n'
+            2 = 'Mean'
+            3 = 'SD'
+            4 = 'Median'
+            5 = 'Min'
+            6 = 'Max'
+            ;
+            * If NO Change from Baseline is to be displayed, this will need to be a character format ;
+            value $stathead
+            '1' = 'n'
+            '2' = 'Mean'
+            '3' = 'SD'
+            '4' = 'Median'
+            '5' = 'Min'
+            '6' = 'Max'
+            ;
+        run;
+        * CATEGORY SEQUENCE - The statistics listed in the $HSTATF format above will be treated as subcategories ;
+        * beneath the Actual and CFB headers.  Tell MR_REPORT_BASIC the sequence  in which to display them beneath each header;
+        * The numbers here should match the start values in the $HSTATF format above.;
+        %let _CAT_SEQUENCE_H = 1 2 3 4 5 6 7 8 9 10;  
+        %let _DEFAULT_STAT_COLHEAD_FMT = stathead;
+        
+        
+        
+    * CHOOSE THE DEFAULTS FOR THE MAJORITY OF THE TABLES;
+        * Actual/CFB labels - Vertical (Vact_cfb.) -or- Horizontal ($Hact_cfb.) ;
+        %let _DEFAULT_ACT_CFB_LABEL_FMT = Vact_cfb;
+        
+        * CATEGORY SEQUENCE - Vertical (categories are actual/cfb) -or- 
+        *  Horizontal (categories are the ordinal designations of the stats themselves);
+        %let _DEFAULT_STAT_SEQUENCE = &_CAT_SEQUENCE_V ;
+        
+        * STAT LABELS- Vertical ($Vstatf.) -or- Horizontal ($Hstatf.)  ;
+        %let _DEFAULT_STAT_LABEL_FMT = $Vstatf.;
+
+
+
+    
+    * Define main/validation side programming flag ;
+    %let validation_yn = N;             /* This is a validation program */
+
+    ***path for validation rtf output***;
+    
+    *option 1: leave blank if you want validation output to go to temp work library; 
+
+    *option 2: hard code where you want validation output; 
+
+    *option 3: output will go in same area as program; 
+    data _null_;
+      val_path_length = length("&G_FULLPATH");
+      val_path = substr("&G_FULLPATH",1,val_path_length-1);
+      call symputx('val_path',strip(val_path));
+    run;
+
+     %put val_path = &val_path;
+
+  ****DEFINE IDENTIFIERS FOR TITLE/FOOTNOTE FILE (TF_EXTRACT.TF) AND OUTPUT NAME;
+option nomprint nomlogic nosymbolgen;
+%macro identify;
+ %if "&g_pgmname" ne "" %then %do;
+ %put G_PGMNAME=&G_PGMNAME; 
+ %let GET_TF_ID=&G_PGMNAME;
+ %end;
+
+%mend;
+%identify;
+  
+	 
+%macro table_report(type = , in_data=, column_1=, col1_label=,_order1_ = _order1_, _order2_=, _order3_=, colprefix = N_PCNT,Trig_Disp=Y); 
+data &in_data.;
+	set &in_data;
+	
+	spanrow_ovr1 = "";
+	spanrow_ovr2 = "";
+	spanrow_chr11= "";
+	spanrow_chr12= "";
+	spanrow_chr21= "";
+	spanrow_chr22= "";
+	break1 = '';
+	break2='';
+	break3='';
+	break4='';
+	
+	ord = _N_;
+run; 
+ 
+ 	%let Overall=Overall;  
+	%let cohort1=%str(Cohort 1 (Age >= 18 and age < 55));
+	%let cohort2= %str(Cohort 2 (Age >= 55)) ;
+	%let _default_treatment_span_text= mRNA-1273; 
+ 
+data report;
+length in_data var width varlabel spanheader usage $200 ;
+
+	ID=0;
+	in_data = "&in_data";  
+	var = "pagenum"  ; width  = ""; varlabel = "";usage   = "order"; options='noprint';  output;
+	var = "_section_"; width  = ""; varlabel = "";usage   = "order"; options='noprint';  output;
+	var = "_skipvar_"; width  = ""; varlabel = "";usage   = "skip" ; output;
+	var = "&_order1_";  width  = ""; varlabel = "";usage   = "order"; options='noprint';  output;
+	%if &_order2_. ne %then %do; var = "&_order2_";  width  = ""; varlabel = "";usage   = "order"; options='noprint';  output;%end;
+	%if &_order3_. ne %then %do; var = "&_order3_";  width  = ""; varlabel = "";usage   = "order"; options='noprint';  output;%end;
+	var = "ord";  width  = ""; varlabel = "";usage   = "order"; options='noprint';  output; 
+	var = "&column_1"; width  = "&_default_col1_width_pcnt."; varlabel = "&col1_label";options = "ID" ; output; 
+ 
+ *1 2 3 77 70 ! 4 5 6 88 80 7 8 9 99 90;
+	ID=1;
+	var = "spanrow_ovr1"; width  = ""; varlabel = "";;usage = "" ;  spanheader =  "&overall"  ;options='Noprint';output;	options='';
+	var = "&colprefix._1";  width  = ""; varlabel = "&colhead_1"; ;usage = "" ;options=''; spanheader =  "" ;output;
+	var = "&colprefix._2";  width  = ""; varlabel = "&colhead_2"; ;usage = "" ; spanheader = "&_default_treatment_span_text"; output;
+	var = "&colprefix._3";  width  = ""; varlabel = "&colhead_3"; ;usage = "" ; spanheader = ""; output;;
+	var = "&colprefix._77"; width  = ""; varlabel = "&colhead_77";;usage = "" ; spanheader = "&_default_treatment_span_text"; output;;
+	var = "&colprefix._70"; width  = ""; varlabel = "&colhead_70";;usage = "" ;  spanheader =  ""  ;output;
+	var = "spanrow_ovr2"; width  = ""; varlabel = "";;usage = "" ; spanheader =  "&overall" ;options='Noprint';output;	options=''; 
+	
+	ID=2;
+	var = "spanrow_chr11"; width  = ""; varlabel = "";;usage = "" ; spanheader =  "&cohort1"; options='Noprint';output;	options='';	
+	var = "&colprefix._4";  width  = ""; varlabel = "&colhead_4"; ;options = "page" ;spanheader =  "";output;
+	var = "&colprefix._5";  width  = ""; varlabel = "&colhead_5"; ;options = '';usage = "" ; spanheader = "&_default_treatment_span_text"; output;;
+	var = "&colprefix._6";  width  = ""; varlabel = "&colhead_6"; ;usage = "" ; spanheader = ""; output;;
+	var = "&colprefix._88"; width  = ""; varlabel = "&colhead_88";;usage = "" ; spanheader = "&_default_treatment_span_text"; output;;	
+	var = "&colprefix._80"; width  = ""; varlabel = "&colhead_80";;usage = "" ; spanheader =   "";output;
+	var = "spanrow_chr12"; width  = ""; varlabel = "";;usage = "" ; spanheader =  "&cohort1" ;;options='Noprint';output;	options='';	
+ 
+	var = "break1"; width  = ""; varlabel = "";;usage = "" ; spanheader =  "" ;options='Noprint';output;	options='';	 
+	var = "break2"; width  = ""; varlabel = "";;usage = "" ; spanheader =  "" ;options='Noprint';output;	options='';
+	
+	var = "spanrow_chr21"; width  = ""; varlabel = "";;usage = "" ; spanheader =  "&cohort2" ;options='Noprint';output;	options='';
+	var = "&colprefix._7";  width  = ""; varlabel = "&colhead_7"; ;usage = "" ; spanheader =  "" ;output;
+	var = "&colprefix._8";  width  = ""; varlabel = "&colhead_8"; ;usage = "" ; spanheader = "&_default_escapechar. &_default_treatment_span_text"; output;;
+	var = "&colprefix._9";  width  = ""; varlabel = "&colhead_9"; ;usage = "" ; spanheader = ""; output;;
+	var = "&colprefix._99"; width  = ""; varlabel = "&colhead_99";;usage = "" ; spanheader = "&_default_escapechar. &_default_treatment_span_text"; output;;	
+	var = "&colprefix._90"; width  = ""; varlabel = "&colhead_90";;usage = "" ; spanheader =  "" ;output;	
+	var = "spanrow_chr22"; width  = ""; varlabel = "";;usage = "" ; spanheader =  "&cohort2"; options='Noprint';output;	options='';
+run;
+
+%if &type  = A %then %do;
+	data report;
+		set report;
+		if var in ("&colprefix._70" "&colprefix._80" "&colprefix._90") then delete;
+			 
+	run;
+%end;	
+
+data report;
+	set report;
+	
+	varlabel = tranwrd(varlabel,"&_default_prcode_split. ","&_default_prcode_split.");
+run;
+ 
+ *Overall;
+data report1;
+	set report;
+	
+	if ID in (1 0); 
+run;
+
+*Cohort 1 and 2;
+data report2;
+	set report;
+	
+	if ID in (2 0); 
+run;
+
+%ML_Create_Meta_Reset *;
+
+
+data _null_;
+	set report1;
+	if var = "&column_1" then do;
+	call execute('%nrstr(	       
+	       %ML_Create_Meta ( 
+	        META_DATA = meta_data1,
+	        in_data='||strip(in_data)||'
+	       ,var = '||strip(var)||'  
+	       ,usage = '||strip(usage)||' 
+	       ,width = '||strip(width)||'
+	       ,options= '||strip(options)||'
+	       ,unit =  p
+	       ,style_column = ProtectSpecialChars=OFF 
+	       ,style_header = just=l vjust = b
+	       ,label =  '||strip(varlabel)||'	       
+	       ,SPANNING_HEADer='||strip(spanheader)||'
+	       ,packed = Y
+	    ) ;
+    	)');
+    end;
+    else do;
+	call execute('%nrstr(	       
+	       %ML_Create_Meta (
+	        META_DATA = meta_data1,
+	       in_data='||strip(in_data)||'
+	       ,var = '||strip(var)||'  
+	       ,usage = '||strip(usage)||' 
+	       ,width = '||strip(width)||'
+	       ,options= '||strip(options)||'
+	       ,unit =  p
+	       ,style_column = ProtectSpecialChars=OFF asis = ON &_default_justification.
+	       ,style_header = just=c
+	       ,label =  '||strip(varlabel)||'	       
+	       ,SPANNING_HEADer='||strip(spanheader)||'
+	       ,packed = Y
+	    ) ;
+    	)');
+        end;
+   run;
+
+%ML_Process_Meta (
+	META_DATA=meta_data1,
+	out_data=processed1) *;	
+	 
+ 
+%ML_Create_Meta_Reset *;
+
+
+data _null_;
+	set report2;
+	if var = "&column_1" then do;
+	call execute('%nrstr(	       
+	       %ML_Create_Meta ( 
+	       META_DATA = meta_data2,
+	       in_data='||strip(in_data)||'
+	       ,var = '||strip(var)||'  
+	       ,usage = '||strip(usage)||' 
+	       ,width = '||strip(width)||'
+	       ,options= '||strip(options)||'
+	       ,unit =  p
+	       ,style_column = ProtectSpecialChars=OFF 
+	       ,style_header = just=l vjust = b
+	       ,label =  '||strip(varlabel)||'	       
+	       ,SPANNING_HEADer='||strip(spanheader)||'
+	       ,packed = Y
+	    ) ;
+    	)');
+    end;
+    else do;
+	call execute('%nrstr(	       
+	       %ML_Create_Meta (
+	       META_DATA = meta_data2,
+	       in_data='||strip(in_data)||'
+	       ,var = '||strip(var)||'  
+	       ,usage = '||strip(usage)||' 
+	       ,width = '||strip(width)||'
+	       ,options= '||strip(options)||'
+	       ,unit =  p
+	       ,style_column = ProtectSpecialChars=OFF asis = ON &_default_justification.
+	       ,style_header = just=c
+	       ,label =  '||strip(varlabel)||'	       
+	       ,SPANNING_HEADer='||strip(spanheader)||'
+	       ,packed = Y
+	    ) ;
+    	)');
+        end;
+   run;
+   
+	%ML_Process_Meta (
+	META_DATA=meta_data2,
+	out_data=processed2) *;	
+	 
+  run;
+  *Macro to display table;
+  %macro table_output();
+     %if &G_OUTTYPE =INTEXT %then %do;  
+      footnote;
+      title;
+      
+   	 %get_tf
+	        (metadata_filepath = &tf_extract.
+		,tlf_progname      = &GET_TF_ID     
+	        ,escapechar        = &_DEFAULT_ESCAPECHAR
+	        ,use_parse_char    = YES
+	        ,write_titles      = &_default_write_titles.
+	        ,write_footnotes   = &_default_write_footnotes.
+	        ,out_tf_dataset    = YES
+		,globaltfs         = 1
+		,Footnote_overline= &_default_Footnote_overline.
+		,Footnote_hanging_indent = &_default_hanging_indent
+
+	        )*; 
+	      
+     %end; 
+     
+	%mr_odsout (  
+	options		= &_default_ods_options.
+ 	);
+ 	
+	%ml_report(in_data = processed1, 
+	   META_DATA = meta_data1,
+           pagenum = pagenum,
+           debug = y,
+           NO_OBS_LINE= &_DEFAULT_NO_SUBJECTS_TABLE. 
+           
+         ) 
+         *;  
+         
+        %if &G_OUTTYPE =INTEXT %then %do;  
+        	title; 
+        	footnote;  
+        	
+        	data _null_;
+	           length g_footer $32000.;
+	           g_footer=strip(symget('g_footer'));
+	           call execute('footnote'||"%eval(&footnote_count+1)"||' j=L"'||strip(g_footer)||'";');
+ 	       run;      	   	 
+ 	%end; 
+ 	
+	%ml_report(in_data = processed2, 
+	   META_DATA = meta_data2,
+           pagenum = pagenum,
+           debug = y,
+           NO_OBS_LINE= &_DEFAULT_NO_SUBJECTS_TABLE.,
+           EMBEDDED_FOOTNOTES= &_default_embed_footnotes.      
+ 	 );  
+ 	 
+	* close ODS;
+	%mr_odsclose *; 
+   %mend;  
+        
+   %if &Trig_Disp. =Y %then %do;   
+  	%table_output();
+   %end;
+%mend;
+
+*sameple call;	
+%*table_report(type=B, in_data=ml_report, column_1=col1, col1_label=BLANK);
+
+ %macro table_align(in_data=,out_data= ,_nudge_ = 3, npcntvars=,trigger_split=n);
+%if &_nudge_ =0 %then %let _nudge_ = 3;
+%let nvars         = %sysfunc(tranwrd(&npcntvars.,%str(N_PCNT_),%str(N_)));
+%let countervars   = %sysfunc(tranwrd(&npcntvars.,%str(N_PCNT_),%str(COUNTER_)));
+%let _nudge_vars   = %sysfunc(tranwrd(&npcntvars.,%str(N_PCNT_),%str(_NUDGE_)));
+%let spacecounter  = %sysfunc(tranwrd(&npcntvars.,%str(N_PCNT_),%str(SPACECOUNTER_)));
+%let _space_vars   = %sysfunc(tranwrd(&npcntvars.,%str(N_PCNT_),%str(_SPACE_)));
+
+  data &out_data.;
+	length nudge_01 - nudge_50 &_nudge_vars.  space_01 - space_50 &_space_vars. $200;
+	 set &in_data.;	
+        call missing(%sysfunc(tranwrd(%sysfunc(strip(&_nudge_vars.)),%str( ),%str(,))));         
+            
+	array  pcnt {*}  &nvars.; 	
+	array npcnt {*}  &npcntvars.; 		
+	array counter {*}  &countervars; 	
+	array nudge {*} nudge_01 - nudge_50; 	
+        array _nudge_ {*}  &_nudge_vars.; 
+	array space {*} space_01 - space_50;
+	array spacecounter {*}  &spacecounter; 
+	array _space_ {*} &_space_vars.;
+	
+		do i = 1 to dim(pcnt);					
+               	call missing(of space_01-space_50);               	
+                call missing(of nudge_01-nudge_50);
+                
+			if length(scan(strip(npcnt{i}),2,'(')) in ( 5 6) then spacecounter{i} = &_nudge_-3;
+			else spacecounter{i} = &_nudge_  - 2;
+
+			
+			do z=1 to spacecounter{i}   ;
+			   space{z}  = 'Y'; 
+			end; 
+			_space_{i} = compress(cat('', of space_01-space_50));
+
+			 %if %upcase(&trigger_split.) = Y %then %do;
+			     npcnt{i} = tranwrd(compress(npcnt{i}), "(","&_default_escapechar.n"||strip(_space_{i})||"(");  
+			     npcnt{i}  = tranwrd(strip(npcnt{i}),'Y',' '); 
+			 %end;
+			 
+			 
+	        o= 1;		
+	        	     
+			
+			if length(strip(scan(strip(npcnt{i}),1,'('))) in (3) and index(strip(npcnt{i}),'(') = 0 then counter{i} = &_nudge_-2; 
+			else if length(strip(scan(strip(npcnt{i}),1,'('))) in (2) and index(strip(npcnt{i}),'(') = 0 then counter{i} = &_nudge_-1; 
+			else if length(strip(scan(strip(npcnt{i}),1,'('))) in (1) and index(strip(npcnt{i}),'(') = 0 then counter{i} = &_nudge_;  
+
+			else if length(strip(scan(strip(npcnt{i}),1,'('))) in (3) then counter{i} = &_nudge_-2;
+			else if length(strip(scan(strip(npcnt{i}),1,'('))) in (2) then counter{i} = &_nudge_-1;
+			else if length(strip(scan(strip(npcnt{i}),1,'('))) in (1) then counter{i} = &_nudge_; 
+			else counter{i}  = &_nudge_. - length(strip(put(pcnt{i},best.))) + 1;
+		
+			do o= 1 to counter{i}  ;
+				nudge{o}  = 'X'; 
+			end;
+			
+			_nudge_{i} = compress(cat('', of nudge_01 - nudge_50));
+	
+			npcnt{i}  = tranwrd(strip(_nudge_{i})||strip(npcnt{i}),'X',' '); 
+			 
+		end;	 
+		
+		drop &countervars nudge_: &_nudge_vars space_:;
+	run; 	
+
+ %mend;
+

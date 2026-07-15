@@ -1,0 +1,262 @@
+************************************************************************************************
+*             CLIENT:   Moderna Therapeutics, Inc.
+*           PROTOCOL:   mRNA-1273-P201
+*
+*            PURPOSE:   Production of unsolicited AE count tables
+*
+*        INPUT FILES:   adb.ADAE, adb.adsl
+*       OUTPUT FILES:	rtf, log
+*
+*      USAGE NOTES: 
+*      
+*************************************************************************************************;
+*  (c) 2020 PPD
+*  All Rights Reserved. 
+*************************************************************************************************;
+
+** Clear log, output, work library ;
+proc datasets mt = data lib = work kill nolist;
+run;
+dm 'log;clear;output;clear;';
+options noquotelenmax nonumber;
+
+*** Defaults ***;
+
+%include "modmrna1273p201_IA_ae_defaults.sas";
+%include "mmwintext.sas";
+
+%process_indata(out_data=&_default_ae., in_data=&_default_ae., bigndata=, trtvar=&_default_trtvar., type=TABLE); 		
+*** For interactive runs define progam name and output details **; 
+        * Subsetting where clause;
+ %Header(Type=A);       
+ 
+ data &_default_ae.;
+ 	set &_default_ae.;
+ 	if &where.; 	
+ run;
+  
+      
+  proc sql noprint;
+  	select distinct count(*) into: N_obs from &_default_in_data.
+ quit; 
+ 
+ * Subgroup ;
+ %let subgroup =      ;           /* subgroup variable - must be present in both the data set used for BigN and the AE data set */
+ %let subgroup_title =    ;            /* title used for the subgroup */
+ %let nosubgroups_subgroup_title =     ; /* title used for subgroup when the input dataset is empty */ 
+ %let extra_header_lines= 2 ;   
+ %let _default_col1_width_pcnt =25;
+ 
+	 ***Big N *** - generates BIGN data set as well as sets up column headers;
+        %ma_bign
+        (in_data = &_default_bign_in_data       /* input data set */
+        , in_where = &_default_bign_in_where    /* subsetting where clause */
+        , subgroup = &subgroup                  /* subgroup the population */  
+       , below_bign =&_default_below_bign
+        ) *;
+
+data rows;
+	length  header  indent_column1 text_for_column1  in_where  _section_ _order1_ $100.;
+	
+	*Section 1;
+	header = 'Unsolicited TEAEs Regardless of Relationship to Study Vaccination';
+	indent_column1   = '2';
+	text_for_column1 = 'All';
+	in_where         = "%str( AETERM ne '')";
+	_section_        = '1';
+	_order1_         = '1';
+	output;
+	call missing(of _all_);
+	
+	indent_column1   = '2';
+	text_for_column1 = 'Serious';
+	in_where         = "%str( upcase(aeser) in ('YES' 'Y') )";
+	_section_        = '1';
+	_order1_         = '2';
+	output;
+	call missing(of _all_);
+	
+	indent_column1   = '2';
+	text_for_column1 =  'Fat'||'al';
+	in_where         = "%str( aeout = 'FAT'||'AL')";
+	_section_        = '1';
+	_order1_         = '3';
+	output;
+	call missing(of _all_);
+
+	indent_column1   = '2';
+	text_for_column1 =  'Medically-Attended';
+	in_where         = "%str( AEMAFL = 'Y')";
+	_section_        = '1';
+	_order1_         = '4';
+	output;
+	call missing(of _all_);
+	
+	indent_column1   = '2';
+	text_for_column1 =  'Leading to Discontinuation from Study Vaccine';
+	in_where         =  "%str(AEACN='DRUG WITHDRAWN')";
+	_section_        = '1';
+	_order1_         = '5';
+	output;
+	call missing(of _all_);
+	
+				
+	indent_column1   = '2';
+	text_for_column1 = 'Leading to Study Discontinuation';
+	in_where         = "%str(AEDISFL = 'Y')";
+	_section_        = '1';
+	_order1_         = '6';
+	output;
+	call missing(of _all_);
+				
+	indent_column1   = '2';
+	text_for_column1 =  'Severe';
+	in_where         = "%str( TOXGGR1N = 2)";
+	_section_        = '1';
+	_order1_         = '7';
+	output;
+	call missing(of _all_);
+run;
+
+data rows;
+	set rows rows (in=a);
+	
+	if a then do;
+		_section_ = '2';
+		if header ne '' then header = 'Unsolicited TEAEs Related to Study Vaccination';
+		in_where  = strip(in_where)||"%str( and AREL = 'RELATED')";
+	end;
+run;
+
+data _null_;
+	set rows;
+	
+	call execute('%nrstr(
+	        %ma_count_one_row(
+		         in_data = &_default_in_data            
+		        ,in_where = '||strip(in_where)||'       
+		        ,subgroup = &subgroup                   
+		        ,text_for_column1  = '||strip(text_for_column1)||'    
+		        ,indent_column1 ='||strip(indent_column1)||'          
+		        ,display_zero_row =Y  
+		        ,_section_ = '||strip(_section_)||'    
+		        , _order1_ = '||strip(_order1_)||'  
+		        ,header = '||strip(header)||'
+		        ,header_indent = 0                     
+		        ,get_subj_count = yes                  
+		        ,get_event_count = no                  
+		        ,count_event_var = n                   
+		        ,out_data = ROW_'||strip(_section_)||strip(_order1_)||'      
+		        ,debug = &_default_debug               
+		        ,help = &_default_help                 
+	        ); 
+    	)');
+   run;
+
+proc sql noprint;
+	select distinct(memname) into: row separated by ' ' 
+		from dictionary.tables
+		where upcase(libname)    ='WORK'  and index(upcase(memname),'ROW_') > 0 ;
+quit;
+%put &row.;
+
+
+        
+** set together the top rows - if you are not generating the event or subject row, be sure to remove it from this call, too;
+        %mu_setall(
+         in_data_list =&row.    /* list of data sets to set together */
+        ,out_data = setall                    /* output data set */
+        ,trigger_replace_out_data = yes         /* when running interactively, this will reset the output data */
+        )*;
+
+
+** calculate display variable for subject row;
+        %ma_n_pcnt(
+         in_data = setall        /* input data set */
+        ,subgroup = &subgroup                   /* subgroup variable */
+		,blank_for_zero_denom	= Y
+		,trigger_pcnt_sign = No
+        ,out_data = n_pcnt                   /* output data set */
+        ,display_option = &_default_n_pcnt_display_option /* which display format option to use 1= n (x.x%) */
+       ,TRIGGER_100_WITH_DECIMAL=No
+        ); 
+                
+** transpose the data ; 
+         
+%mu_transpose(in_data = n_pcnt,
+              transpose_vars = n pcnt n_pcnt,
+              transpose_by = _section_ _order1_ col1 _indent_ _skipvar_,
+              transpose_id = &_default_trtvar.,
+              out_data = trans);
+              
+%mu_get_sort_order(in_data = trans);
+ %if &G_OUTTYPE =INTEXT %then %do;  
+  	%mw_post_process(indata =trans,column1=col1);
+  %end;
+	
+proc sort data = trans;
+    by _section_ _order1_ col1 _indent_ _skipvar_;
+run;	  
+
+ %mu_get_sort_order(trans);
+%mr_pack(in_data = trans,
+         var = col1,
+         col1_width_pcnt = %sysevalf(&_default_col1_width_pcnt.),
+         out_data = pack);
+
+%get_tf
+(metadata_filepath = &tf_extract.
+,tlf_progname      = &get_tf_id.     
+,escapechar        = &_default_escapechar.
+,use_parse_char    = yes
+,write_titles      = yes
+,write_footnotes   = yes
+,out_tf_dataset    = yes
+,globaltfs         = 1
+)*;
+
+%mu_lines_per_page(in_data = pack, linesperpage = 40, NESTED_HEADERLINES = 2);
+
+%mr_pagebreak_table(in_data = pack,
+                    out_data = pagebreak,
+                    section = _section_,
+                    subgrp = ,
+                    orderby = &sort_order.,
+                    section_protection = N,
+                    lineskip = 1);
+
+ proc sql noprint;
+     select distinct name into: npcntvars separated by " " from dictionary.columns where libname = 'WORK' and memname= 'PAGEBREAK' and upcase(name) in ('N_PCNT_1' 'N_PCNT_2' 'N_PCNT_3' 'N_PCNT_77');
+     select distinct name into: npcntvars2 separated by " " from dictionary.columns where libname = 'WORK' and memname= 'PAGEBREAK' and
+         index(upcase(name), 'N_PCNT') and upcase(name) not in ('N_PCNT_1' 'N_PCNT_2' 'N_PCNT_3' 'N_PCNT_77');
+quit;
+
+%table_align( in_data=pagebreak ,out_data=align ,_nudge_ = 8,npcntvars=&npcntvars.);
+%table_align( in_data=align ,out_data=align2 ,_nudge_ = 3,npcntvars=&npcntvars2.);
+	        
+        data align2;
+        	set align2;  
+        
+ 		if &N_obs. = 0 then delete;
+        run; 
+        
+                           
+	 %if &G_OUTTYPE =INTEXT %then %do; 
+	     proc sql noprint;
+	   	 select distinct name into: n_val separated by " " from dictionary.columns where libname = 'WORK' and memname= 'ALIGN2' 
+	   		 and index(upcase(name),'N_PCNT')>0; 
+	       quit;
+	       
+	       *stip N_pcnt values;
+	   	data ALIGN2;
+	   		set ALIGN2;
+	   		pagenum = 1; 
+	   		
+	   		array nstrip {*} &n_val.;		
+	   		do i = 1 to dim(nstrip); 
+	   			nstrip{i}  =strip(nstrip{i});  
+	   		end;   
+	   	run;
+	   %end;
+   
+%table_report(type=A, in_data=align2, column_1=pack_col1, col1_label=BLANK);

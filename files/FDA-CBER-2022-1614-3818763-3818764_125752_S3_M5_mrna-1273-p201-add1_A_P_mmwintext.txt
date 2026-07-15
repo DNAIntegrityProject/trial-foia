@@ -1,0 +1,66 @@
+************************************************************************************************
+*             CLIENT:   ModernaTX, Inc.
+*           PROTOCOL:   mRNA-1273-P201
+*
+*            PURPOSE:   Postprocess of dataset using mw_sentence_case and mw_footnote
+*
+*        INPUT FILES:    
+*       OUTPUT FILES:	 
+*
+*      	 USAGE NOTES: 
+*
+*************************************************************************************************
+*  Copyright 2020 Pharmaceutical Product Development, Inc.
+*  All Rights Reserved.
+************************************************************************************************;
+
+
+
+*Post process for intext tables;
+ %macro mw_post_process(indata = ,  column1=&column_1.);  	
+           data &indata.;  
+	      length &column1. $500  ;
+		set &indata. (rename = &column1. = _&column1.);  
+		&column1. = strip(_&column1.);
+	  run;
+
+		   *sentence case column 1;
+		    %mw_sentence_case(
+				 termfile	= %str(&G_RSVTERM.)
+				,indata		= &indata.
+				,outdata	= &indata.0
+				,var		= &column1.
+				);
+
+		   %mw_format_footnote_reference(
+			  in_data	= &indata.0
+			 ,out_data	= &indata.00
+			 ,var		= &column1.
+			 ,fmtname	= %str(&_DEFAULT_FOOTFMT.)
+			 );
+		 
+		data  &indata. ;
+		length &column1. $1000;
+			set &indata.00; 
+
+			*Upcase text that are not properly being displayed due to multiple protected texts on the same line;
+			 
+			&column1. = tranwrd(&column1.,'covid-19','COVID-19');
+			&column1. = tranwrd(&column1.,'sars-cov-2','SARS-CoV-2'); 
+			&column1. = tranwrd(&column1.,'(pp)','(PP)');   			
+			&column1. = tranwrd(&column1.,"super a&_default_escapechar.n","super a");  
+			&column1. = tranwrd(&column1.,"super b&_default_escapechar.n","super b");  
+			&column1. = tranwrd(&column1.,"super c&_default_escapechar.n","super c");  
+			&column1. = tranwrd(&column1.,"super d&_default_escapechar.n","super d");  
+			&column1. = tranwrd(&column1.,"super e&_default_escapechar.n","super e");  
+			&column1. = tranwrd(&column1.,"super f&_default_escapechar.n","super f");  
+			&column1. = tranwrd(&column1.,"super g&_default_escapechar.n","super g");  
+			&column1. = tranwrd(&column1.,"super h&_default_escapechar.n","super h");   
+			&column1. = tranwrd(&column1.,"super&_default_escapechar.n 2","super 2");   
+		run; 
+
+		proc datasets lib=work noprint;
+			delete    &indata.0 &indata.00  ;
+		run; 
+	  %mend;
+	   
