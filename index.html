@@ -11,6 +11,10 @@
   header{ background:var(--blue); color:#fff; padding:20px 24px; }
   header h1{ margin:0 0 4px; font-size:20px; }
   header p{ margin:0; opacity:.9; font-size:13px; }
+  nav.top{ background:#173d6f; padding:0 24px; display:flex; gap:2px; }
+  nav.top a{ color:#cfe0f5; text-decoration:none; font-size:13px; font-weight:600; padding:11px 14px; border-bottom:3px solid transparent; }
+  nav.top a:hover{ color:#fff; }
+  nav.top a[aria-current]{ color:#fff; border-bottom-color:#7fb0ff; }
   .wrap{ max-width:1280px; margin:0 auto; padding:18px 24px 60px; }
   .stats{ display:flex; gap:14px; flex-wrap:wrap; margin:16px 0; }
   .stat{ background:#fff; border:1px solid var(--line); border-radius:10px; padding:10px 16px; min-width:120px; }
@@ -50,6 +54,10 @@
   <h1>FDA-FOIA-2026-6007 — Document Navigator</h1>
   <p>Bioresearch Monitoring (BIMO) release · Pfizer &amp; Moderna COVID-19 vaccines · CBER Partial Response 1.</p>
 </header>
+<nav class="top">
+  <a href="index.html" aria-current="page">Documents</a>
+  <a href="exemptions.html">Exemptions</a>
+</nav>
 <div class="wrap">
   <div class="stats" id="stats"></div>
 
