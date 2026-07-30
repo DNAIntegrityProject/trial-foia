@@ -63,18 +63,22 @@
 <div class="wrap">
 
   <div class="note">
-    Every overlapping PDF was scanned on <b>both</b> sides with the identical
-    scanner, so a difference is real — not an OCR artifact. Two kinds:
-    <span class="tag tag-rr">re-redaction</span> the <b>same document</b> (identical
-    page count) redacted differently, and
-    <span class="tag tag-ver">version</span> a re-issued / different-length copy of
-    the document (page counts differ), where marker differences also reflect
-    different content. Δ is this release minus PHMPT; <span class="up">positive</span>
-    means this release redacted more. Use the
+    Both versions were compared <b>text-layer to text-layer, page by page</b> — a
+    difference is only counted on pages where <b>both</b> copies have real
+    extractable text, so image-scan / OCR artifacts are excluded. Two kinds:
+    <span class="tag tag-rr">re-redaction</span> the <b>same document</b> (same page
+    count) with different text-layer redactions, and
+    <span class="tag tag-ver">version</span> a re-issued / different-length copy
+    (page counts differ; pages don't line up, so not page-compared).
+    <b>The robust finding is added redactions:</b> where this release's text contains
+    <b>(b)(6)</b> personal-privacy markers PHMPT lacks — those can't be OCR artifacts.
+    Rows marked <span class="tag" style="background:#fdecc8;color:#8a5a00">verify</span>
+    have <i>fewer</i> markers (mostly Moderna CRFs), which often reflects this release
+    delivering the page as an <b>image</b> rather than a real un-redaction — open both
+    and check. Use the
     <a class="vlink vlink-this" style="pointer-events:none">This release</a> and
-    <a class="vlink vlink-phmpt" style="pointer-events:none">PHMPT</a> links to open
-    both copies and compare; for same-document re-redactions the
-    <b>pages where redactions differ</b> are listed so you can jump straight to them.
+    <a class="vlink vlink-phmpt" style="pointer-events:none">PHMPT</a> links plus the
+    listed <b>diff pages</b> to compare.
   </div>
 
   <div class="stats" id="stats"></div>
@@ -86,6 +90,13 @@
         <option value="">all</option>
         <option value="reredaction">re-redaction (same document)</option>
         <option value="version">version (different length)</option>
+      </select>
+    </label>
+    <label>Show
+      <select id="f-conf">
+        <option value="">all</option>
+        <option value="high">added redactions (high confidence)</option>
+        <option value="verify">flagged 'verify'</option>
       </select>
     </label>
     <label>Direction
