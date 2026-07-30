@@ -34,6 +34,12 @@
   .tag-ver{ background:#eef1f5; color:#5b6676; }
   .up{ color:var(--red); font-weight:700; }
   .down{ color:var(--green); font-weight:700; }
+  .vlink{ display:inline-block; margin:1px 4px 2px 0; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:600; text-decoration:none; border:1px solid var(--line); white-space:nowrap; }
+  .vlink-this{ background:#e4eefb; color:#1a63c9; border-color:#c7dbf5; }
+  .vlink-phmpt{ background:#e6f0e9; color:#137333; border-color:#cfe4d4; }
+  .vlink:hover{ filter:brightness(.96); }
+  .vlink small{ font-weight:400; opacity:.75; }
+  .dpages{ font-size:11px; color:var(--muted); max-width:230px; word-break:break-word; }
   .controls{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
   .controls input, .controls select{ padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:13px; background:#fff; }
   .controls input[type=search]{ flex:1; min-width:220px; }
@@ -63,8 +69,12 @@
     page count) redacted differently, and
     <span class="tag tag-ver">version</span> a re-issued / different-length copy of
     the document (page counts differ), where marker differences also reflect
-    different content. Δ is trove minus PHMPT; <span class="up">positive</span> means
-    this release redacted more.
+    different content. Δ is this release minus PHMPT; <span class="up">positive</span>
+    means this release redacted more. Use the
+    <a class="vlink vlink-this" style="pointer-events:none">This release</a> and
+    <a class="vlink vlink-phmpt" style="pointer-events:none">PHMPT</a> links to open
+    both copies and compare; for same-document re-redactions the
+    <b>pages where redactions differ</b> are listed so you can jump straight to them.
   </div>
 
   <div class="stats" id="stats"></div>
@@ -91,12 +101,12 @@
   <table id="results">
     <thead><tr>
       <th data-sort="filename">Document</th>
+      <th>Compare both versions</th>
       <th data-sort="kind">Kind</th>
-      <th data-sort="category">Category</th>
-      <th class="num" data-sort="mag">Δ markers</th>
-      <th>This release</th>
-      <th>PHMPT</th>
-      <th class="num" data-sort="pages">pages (t/p)</th>
+      <th class="num" data-sort="mag">Δ (this − PHMPT)</th>
+      <th>Pages where redactions differ</th>
+      <th>Markers (this / PHMPT)</th>
+      <th class="num" data-sort="pages">Pages (this / PHMPT)</th>
     </tr></thead>
     <tbody id="rows"></tbody>
   </table>

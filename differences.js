@@ -66,17 +66,33 @@ function apply() {
   page = 1; render();
 }
 
+function versionLinks(r) {
+  const t = r.trove_link
+    ? `<a class="vlink vlink-this" href="${esc(r.trove_link)}" target="_blank" rel="noopener">This release${r.trove_oversize ? " <small>(GitHub)</small>" : ""}</a>`
+    : "";
+  const p = r.phmpt_link
+    ? `<a class="vlink vlink-phmpt" href="${esc(r.phmpt_link)}" target="_blank" rel="noopener">PHMPT</a>`
+    : "";
+  return t + p || "<span class='muted'>—</span>";
+}
+function diffPagesCell(r) {
+  if (r.kind !== "reredaction") return "<span class='muted'>version — pages don't align</span>";
+  const dp = r.diff_pages || [];
+  if (!dp.length) return "<span class='muted'>—</span>";
+  const shown = dp.slice(0, 25).join(", ");
+  return `<div class="dpages">${dp.length} page(s): ${shown}${dp.length > 25 ? " …" : ""}</div>`;
+}
 function render() {
   const slice = view.slice((page - 1) * PAGE, page * PAGE);
   $("rows").innerHTML = slice.map((r) => {
-    const link = r.doc_link
-      ? `<a class="fn" href="${esc(r.doc_link)}" target="_blank" rel="noopener">${esc(r.filename)}</a>`
-      : esc(r.filename);
     const tag = r.kind === "reredaction"
       ? '<span class="tag tag-rr">re-redaction</span>' : '<span class="tag tag-ver">version</span>';
-    return `<tr><td class="fn">${link}</td><td>${tag}</td><td>${esc(r.category)}</td>` +
-      `<td class="num">${deltaStr(r.delta)}</td><td>${markers(r.trove)}</td>` +
-      `<td>${markers(r.phmpt)}</td><td class="num">${esc(r.pages)}</td></tr>`;
+    return `<tr><td class="fn">${esc(r.filename)}</td>` +
+      `<td>${versionLinks(r)}</td><td>${tag}</td>` +
+      `<td class="num">${deltaStr(r.delta)}</td>` +
+      `<td>${diffPagesCell(r)}</td>` +
+      `<td>${markers(r.trove)} <span class="muted">/</span> ${markers(r.phmpt)}</td>` +
+      `<td class="num">${esc(r.pages)}</td></tr>`;
   }).join("");
   $("count").textContent = `${fmt(view.length)} document(s)`;
   const pages = Math.max(1, Math.ceil(view.length / PAGE));
